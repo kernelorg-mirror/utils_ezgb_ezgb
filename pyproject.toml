@@ -40,6 +40,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 strict = true

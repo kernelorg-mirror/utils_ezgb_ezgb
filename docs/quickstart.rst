@@ -39,7 +39,27 @@ filters:
    # Only bugs with a specific label
    net_bugs = repo.list_bugs(label='area/network')
 
+   # Only bugs modified after a given time
+   recent = repo.list_bugs(since='2024-11-01 00:00:00')
+
 Each item in the list is a :class:`~ezgb.Bug` dataclass.
+
+The *since* parameter accepts a unix timestamp (``int``), a
+:class:`~datetime.datetime`, or a date string in ISO-8601 /
+``YYYYMMDDHHMMSS`` format.
+
+Iterating lazily
+----------------
+
+For large repositories, :meth:`~ezgb.GitBugRepo.iter_bugs` yields
+bugs one at a time instead of loading them all into memory:
+
+.. code-block:: python
+
+   for bug in repo.iter_bugs(status=Status.OPEN):
+       print(bug.title)
+
+It accepts the same filters as ``list_bugs``.
 
 Reading a single bug
 --------------------
@@ -120,6 +140,19 @@ Assignment is tracked through ``assigned:email`` labels:
 
    repo.assign(bug.id, 'alice@example.com')
    repo.unassign(bug.id)
+
+Reading attachments
+-------------------
+
+Comments can reference file attachments by blob hash. Use
+:meth:`~ezgb.GitBugRepo.get_attachment` to read the raw bytes:
+
+.. code-block:: python
+
+   for comment in bug.comments:
+       for blob_hash in comment.attachment_ids:
+           data = repo.get_attachment(blob_hash)
+           print(len(data), 'bytes')
 
 Listing identities
 ------------------

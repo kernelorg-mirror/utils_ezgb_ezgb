@@ -5,6 +5,9 @@
 """ezgb: a standalone Python library for git-bug repositories."""
 from __future__ import annotations
 
+from collections.abc import Iterator
+from datetime import datetime, timezone
+
 from ezgb._models import (
     AmbiguousBugIdError,
     Bug,
@@ -58,18 +61,56 @@ class GitBugRepo:
 
     # -- Read operations -----------------------------------------------------
 
+    @staticmethod
+    def _since_to_ts(since: str | datetime | int | None) -> int:
+        """Normalise a *since* value to a unix timestamp (0 = no filter)."""
+        if since is None:
+            return 0
+        if isinstance(since, int):
+            return since
+        if isinstance(since, datetime):
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            return int(since.timestamp())
+        # str -- delegate to the reader's parser
+        from ezgb._reader import BugReader
+        return BugReader._parse_since(since)
+
     def list_bugs(
         self,
         *,
         status: Status | None = None,
         label: str | None = None,
+        since: str | datetime | int | None = None,
     ) -> list[Bug]:
-        """List all bugs, optionally filtered by status and/or label."""
-        refs = self._reader.list_bug_refs()
-        bids = [bid for bid, _commit in refs]
-        self._reader.prefetch_bugs(bids)
-        results: list[Bug] = []
-        for bid in bids:
+        """List all bugs, optionally filtered by status, label, and/or
+        modification time.
+
+        *since* accepts a unix timestamp (``int``), a
+        :class:`~datetime.datetime`, or a string in ISO-8601 /
+        ``YYYYMMDDHHMMSS`` format.  Only bugs whose tip commit is
+        newer than this value are returned.
+        """
+        return list(self.iter_bugs(
+            status=status, label=label, since=since,
+        ))
+
+    def iter_bugs(
+        self,
+        *,
+        status: Status | None = None,
+        label: str | None = None,
+        since: str | datetime | int | None = None,
+    ) -> Iterator[Bug]:
+        """Lazily iterate over bugs, yielding one at a time.
+
+        Accepts the same filters as :meth:`list_bugs` but avoids
+        building all snapshots up front, which saves memory on large
+        repositories.
+        """
+        ts = self._since_to_ts(since)
+        refs = self._reader.list_bug_refs(since=ts)
+        for bid, _commit in refs:
             try:
                 bug = self._reader.build_bug(bid)
             except BugNotFoundError:
@@ -78,13 +119,19 @@ class GitBugRepo:
                 continue
             if label is not None and label not in bug.labels:
                 continue
-            results.append(bug)
-        return results
+            yield bug
 
     def get_bug(self, bid: str) -> Bug:
         """Get a single bug by ID (full or abbreviated)."""
         bid = self._reader.resolve_bug_id(bid)
         return self._reader.build_bug(bid)
+
+    def get_attachment(self, blob_hash: str) -> bytes:
+        """Read a file attachment by its blob hash.
+
+        Blob hashes are found in :attr:`Comment.attachment_ids`.
+        """
+        return self._reader.cat_blob_bytes(blob_hash)
 
     def search(self, query: str) -> list[Bug]:
         """Search bugs using the git-bug CLI query language.

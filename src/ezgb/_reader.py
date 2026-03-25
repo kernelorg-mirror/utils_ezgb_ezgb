@@ -156,9 +156,22 @@ class BugReader:
         return result
 
     def _cat_blob(self, blob_hash: str) -> str:
-        """Read a single git blob."""
+        """Read a single git blob as text."""
         ecode, out = git_run(self._repo, ['cat-file', 'blob', blob_hash])
         if ecode != 0 or not isinstance(out, str):
+            raise BugNotFoundError('failed to read blob %s' % blob_hash)
+        return out
+
+    def cat_blob_bytes(self, blob_hash: str) -> bytes:
+        """Read a single git blob as raw bytes.
+
+        Useful for reading file attachments referenced by
+        :attr:`Comment.attachment_ids`.
+        """
+        ecode, out = git_run(
+            self._repo, ['cat-file', 'blob', blob_hash], decode=False,
+        )
+        if ecode != 0 or not isinstance(out, bytes):
             raise BugNotFoundError('failed to read blob %s' % blob_hash)
         return out
 
@@ -195,18 +208,35 @@ class BugReader:
 
     # -- Ref enumeration -----------------------------------------------------
 
-    def list_bug_refs(self) -> list[tuple[str, str]]:
-        """Return ``[(bug_id, commit_hash)]`` for all bugs."""
+    def list_bug_refs(
+        self, *, since: int = 0,
+    ) -> list[tuple[str, str]]:
+        """Return ``[(bug_id, commit_hash)]`` for all bugs.
+
+        If *since* is a positive unix timestamp, only refs whose
+        tip commit is newer than that timestamp are returned.
+        """
+        if since > 0:
+            fmt = '%(refname:short) %(objectname) %(committerdate:unix)'
+        else:
+            fmt = '%(refname:short) %(objectname)'
         lines = git_lines(self._repo, [
-            'for-each-ref', '--format=%(refname:short) %(objectname)',
+            'for-each-ref', '--format=%s' % fmt,
             'refs/bugs/',
         ])
         results: list[tuple[str, str]] = []
         for line in lines:
-            parts = line.split(None, 1)
-            if len(parts) != 2:
+            parts = line.split(None, 2)
+            if len(parts) < 2:
                 continue
-            refname, commit = parts
+            refname, commit = parts[0], parts[1]
+            if since > 0 and len(parts) == 3:
+                try:
+                    ts = int(parts[2])
+                except ValueError:
+                    continue
+                if ts < since:
+                    continue
             bid = refname.split('/')[-1]
             results.append((bid, commit))
         return results

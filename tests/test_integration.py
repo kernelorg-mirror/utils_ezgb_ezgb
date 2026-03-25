@@ -208,6 +208,74 @@ class TestIdentities:
         assert 'test@example.com' in emails
 
 
+class TestIterBugs:
+    def test_yields_same_as_list(self, gb_repo):
+        gb_repo.create_bug('Bug A', 'Body A')
+        gb_repo.create_bug('Bug B', 'Body B')
+
+        gb_repo.invalidate()
+        listed = gb_repo.list_bugs()
+        gb_repo.invalidate()
+        iterated = list(gb_repo.iter_bugs())
+
+        assert len(listed) == len(iterated) == 2
+        assert {b.title for b in listed} == {b.title for b in iterated}
+
+    def test_iter_with_filter(self, gb_repo):
+        gb_repo.create_bug('Open one', 'Body')
+        closed = gb_repo.create_bug('Closed one', 'Body')
+        gb_repo.set_status(closed.id, Status.CLOSED)
+
+        gb_repo.invalidate()
+        open_bugs = list(gb_repo.iter_bugs(status=Status.OPEN))
+        assert len(open_bugs) == 1
+        assert open_bugs[0].title == 'Open one'
+
+
+class TestSinceFilter:
+    def test_list_bugs_since(self, gb_repo):
+        """Bugs created before 'since' are excluded."""
+        bug = gb_repo.create_bug('Recent bug', 'Body')
+        # Use a timestamp far in the past -- should include the bug
+        bugs = gb_repo.list_bugs(since=0)
+        assert any(b.id == bug.id for b in bugs)
+
+        # Use a timestamp far in the future -- should exclude
+        gb_repo.invalidate()
+        bugs = gb_repo.list_bugs(since=9999999999)
+        assert len(bugs) == 0
+
+    def test_since_with_iso_string(self, gb_repo):
+        gb_repo.create_bug('String since', 'Body')
+        gb_repo.invalidate()
+        bugs = gb_repo.list_bugs(since='2020-01-01 00:00:00')
+        assert len(bugs) >= 1
+
+
+class TestAttachments:
+    def test_get_attachment_round_trip(self, gb_repo):
+        """Create a bug with an attachment, then read it back."""
+        # Create a bug -- its description becomes comment 0
+        bug = gb_repo.create_bug('Attachment test', 'See attached')
+        bug = gb_repo.get_bug(bug.id)
+
+        # Comments might not have attachments in this simple case,
+        # but we can at least verify get_attachment works on a known
+        # blob. Use the ops blob itself as a stand-in.
+        # Instead, test against an actual blob by writing one via git.
+        import subprocess
+        repo_path = gb_repo._repo
+        result = subprocess.run(
+            ['git', '-C', repo_path, 'hash-object', '-w', '--stdin'],
+            input=b'test file content',
+            capture_output=True, check=True,
+        )
+        blob_hash = result.stdout.decode().strip()
+
+        data = gb_repo.get_attachment(blob_hash)
+        assert data == b'test file content'
+
+
 class TestCache:
     def test_invalidate_and_reread(self, gb_repo):
         bug = gb_repo.create_bug('Cache test', 'Body')

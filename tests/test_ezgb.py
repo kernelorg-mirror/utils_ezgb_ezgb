@@ -716,3 +716,127 @@ class TestGitBugRepo:
         identities = repo.list_identities()
         assert len(identities) == 1
         assert identities[0].name == 'Alice'
+
+    def test_iter_bugs(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+        bugs = list(repo.iter_bugs())
+        assert len(bugs) == 1
+        assert bugs[0].title == 'Test bug'
+
+    def test_iter_bugs_is_lazy(self, mock_git):
+        """iter_bugs yields one at a time without prefetching all."""
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+        it = repo.iter_bugs()
+        # Nothing built yet
+        assert BUG_ID not in repo._reader._bug_cache
+        bug = next(it)
+        assert bug.title == 'Test bug'
+
+    def test_get_attachment(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        blob_hash = 'aa' * 20
+
+        def _blob_handler(repo_path, args, stdin=None, decode=True):
+            return (0, b'file contents here')
+
+        mock_git.run_routes['cat-file blob %s' % blob_hash] = _blob_handler
+        data = repo.get_attachment(blob_hash)
+        assert data == b'file contents here'
+
+    def test_list_bugs_since(self, mock_git):
+        """list_bugs(since=...) filters by committer timestamp."""
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        # Ref with timestamp 1700005000
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s 1700005000' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+
+        # since before the commit — should match
+        bugs = repo.list_bugs(since=1700000000)
+        assert len(bugs) == 1
+
+        # since after the commit — should not match
+        repo.invalidate()
+        bugs = repo.list_bugs(since=1700010000)
+        assert len(bugs) == 0
+
+    def test_list_bugs_since_string(self, mock_git):
+        """list_bugs(since='2023-11-14 ...') parses the string."""
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s 1700005000' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+
+        bugs = repo.list_bugs(since='2023-11-14 00:00:00')
+        assert len(bugs) == 1
+
+
+# ------------------------------------------------------------------
+# Attachment reading
+# ------------------------------------------------------------------
+
+class TestCatBlobBytes:
+    def test_reads_bytes(self, reader, mock_git):
+        blob_hash = 'aa' * 20
+
+        def _handler(repo_path, args, stdin=None, decode=True):
+            return (0, b'binary content')
+
+        mock_git.run_routes['cat-file blob %s' % blob_hash] = _handler
+        data = reader.cat_blob_bytes(blob_hash)
+        assert data == b'binary content'
+        assert isinstance(data, bytes)
+
+    def test_missing_blob_raises(self, reader, mock_git):
+        blob_hash = 'ff' * 20
+
+        def _handler(repo_path, args, stdin=None, decode=True):
+            return (128, b'')
+
+        mock_git.run_routes['cat-file blob %s' % blob_hash] = _handler
+        with pytest.raises(BugNotFoundError):
+            reader.cat_blob_bytes(blob_hash)
+
+
+# ------------------------------------------------------------------
+# Since filtering on list_bug_refs
+# ------------------------------------------------------------------
+
+class TestListBugRefsSince:
+    def test_no_filter(self, reader, mock_git):
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        refs = reader.list_bug_refs()
+        assert len(refs) == 1
+
+    def test_since_includes_newer(self, reader, mock_git):
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s 1700005000' % (BUG_ID, commit),
+        ]
+        refs = reader.list_bug_refs(since=1700000000)
+        assert len(refs) == 1
+
+    def test_since_excludes_older(self, reader, mock_git):
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s 1700005000' % (BUG_ID, commit),
+        ]
+        refs = reader.list_bug_refs(since=1700010000)
+        assert len(refs) == 0
