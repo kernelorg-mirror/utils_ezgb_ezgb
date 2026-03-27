@@ -200,6 +200,27 @@ class GitBugRepo:
         """Remove a label from a bug."""
         self._writer.remove_label(bid, label)
 
+    def remove_bug(self, bid: str) -> None:
+        """Permanently delete a bug. This is irreversible."""
+        self._writer.remove_bug(bid)
+
+    def push(self, remote: str = 'origin') -> tuple[int, str, str]:
+        """Push bugs and identities to a remote.
+
+        Returns ``(returncode, stdout, stderr)``.
+        """
+        return self._writer.push(remote)
+
+    def pull(self, remote: str = 'origin') -> tuple[int, str, str]:
+        """Pull bugs and identities from a remote and merge.
+
+        Returns ``(returncode, stdout, stderr)``. Caches are
+        invalidated automatically after pull.
+        """
+        result = self._writer.pull(remote)
+        self._reader.invalidate()
+        return result
+
     # -- Cache management ----------------------------------------------------
 
     def invalidate(self, bid: str | None = None) -> None:

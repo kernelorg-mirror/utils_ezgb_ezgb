@@ -117,3 +117,32 @@ class BugWriter:
             raise CliError('git bug label rm failed: %s' % err)
         self._reader.invalidate(bid)
 
+    def remove_bug(self, bid: str) -> None:
+        """Permanently delete a bug.
+
+        Calls ``git bug rm`` which removes the local ref and all
+        remote copies. This is irreversible.
+        """
+        bid = self._reader.resolve_bug_id(bid)
+        ecode, out, err = self._cli(['bug', 'rm', bid])
+        if ecode != 0:
+            raise CliError('git bug rm failed: %s' % err)
+        # Invalidate everything — the refs list has changed
+        self._reader.invalidate()
+
+    def push(self, remote: str = 'origin') -> tuple[int, str, str]:
+        """Push bugs and identities to a remote.
+
+        Returns ``(returncode, stdout, stderr)`` so the caller can
+        display output to the user.
+        """
+        return self._cli(['push', remote])
+
+    def pull(self, remote: str = 'origin') -> tuple[int, str, str]:
+        """Pull bugs and identities from a remote and merge.
+
+        Returns ``(returncode, stdout, stderr)``. The caller should
+        invalidate caches after a successful pull.
+        """
+        return self._cli(['pull', remote])
+
