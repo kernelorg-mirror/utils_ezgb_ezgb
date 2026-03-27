@@ -23,7 +23,7 @@ ezgb splits its work into two paths:
 Module layout
 -------------
 
-::
+Python::
 
    src/ezgb/
      __init__.py   GitBugRepo facade and public API
@@ -31,6 +31,12 @@ Module layout
      _git.py       Thin subprocess wrappers for git and git-bug
      _reader.py    BugReader: reads and caches bug data from git objects
      _writer.py    BugWriter: delegates mutations to the git-bug CLI
+
+Lua::
+
+   lua/
+     ezgb.lua      Read-only library (ref enumeration, op-pack replay,
+                    identity resolution, combined ID generation)
 
 How git-bug stores data
 -----------------------
@@ -143,3 +149,55 @@ gives each comment a globally unique, deterministic identifier.
 The interleaving pattern places the operation hash characters at
 positions 1, 3, 5, 9, and then every position where
 ``i >= 10 and i % 5 == 4``. All other positions come from the bug ID.
+
+Operation hashing
+^^^^^^^^^^^^^^^^^
+
+git-bug computes each operation's hash by SHA-256-hashing the compact
+JSON serialization produced by Go's ``json.Marshal``. Go escapes
+``<``, ``>``, and ``&`` as ``\u003c``, ``\u003e``, ``\u0026`` -- a
+Go-specific behaviour that neither Python's ``json.dumps`` nor Lua's
+cjson reproduces.
+
+Re-serializing a parsed operation would produce different bytes and a
+different hash, which breaks ``OP_EDIT_COMMENT`` matching (the
+``target`` field carries the Go-computed hash). To get correct hashes,
+both the Python and Lua implementations extract each operation's raw
+JSON string directly from the blob, preserving Go's escaping verbatim.
+
+In Python this is done using ``json.JSONDecoder.raw_decode()`` to find
+object boundaries in the original string. In Lua, a manual brace-depth
+tracker serves the same purpose.
+
+Lua library
+-----------
+
+The Lua library (``lua/ezgb.lua``) mirrors the Python reader's
+functionality but is read-only -- it has no write path.
+
+Instead of spawning ``git`` subprocesses, it uses
+`luagit2 <https://github.com/libgit2/luagit2>`_ (libgit2 bindings)
+for direct git object access. This makes it suitable for embedding in
+tools like cgit where subprocess overhead would be unacceptable.
+
+The public API returns plain Lua tables:
+
+.. code-block:: lua
+
+   local ezgb = require("ezgb")
+   ezgb.open("/path/to/repo")
+
+   -- List bugs
+   local refs = ezgb.list_bug_refs()
+
+   -- Build a full bug snapshot
+   local bug = ezgb.build_bug(refs[1].id)
+   -- bug.title, bug.status, bug.creator, bug.comments, ...
+
+   -- Resolve identities
+   local id = ezgb.resolve_identity(identity_id)
+   -- id.name, id.email, id.login
+
+Labels are stored as set-tables (``{["label"] = true, ...}``) rather
+than arrays. Timestamps are plain unix integers. Error handling uses
+Lua's idiomatic ``nil, error_string`` return pattern.

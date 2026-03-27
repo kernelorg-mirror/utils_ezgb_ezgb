@@ -1,8 +1,15 @@
 Installation
 ============
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+Python library
+--------------
+
 Requirements
-------------
+^^^^^^^^^^^^
 
 - **Python 3.9** or later.
 - **git** must be on your ``$PATH``.
@@ -10,7 +17,7 @@ Requirements
   create or modify bugs. Reading existing bugs only needs ``git``.
 
 Install from source
--------------------
+^^^^^^^^^^^^^^^^^^^
 
 Clone the repository and install in editable mode:
 
@@ -27,7 +34,7 @@ To also install the development tools (pytest, mypy, ruff):
    pip install -e '.[dev]'
 
 Verify
-------
+^^^^^^
 
 Open a Python shell and check that the import works:
 
@@ -44,3 +51,37 @@ available:
 
    $ git bug version
    git-bug version: v0.10.1
+
+Lua library
+-----------
+
+The Lua library is read-only and uses luagit2 for git object access.
+
+Requirements
+^^^^^^^^^^^^
+
+- **Lua 5.1** or later (including LuaJIT).
+- **luagit2** (``lua-git2``) -- libgit2 bindings for Lua.
+- **luaossl** -- OpenSSL bindings (for SHA-256 operation hashing).
+- **lua-cjson** or **lua-json** -- JSON parsing.
+
+Install with luarocks
+^^^^^^^^^^^^^^^^^^^^^
+
+From the ezgb source tree:
+
+.. code-block:: bash
+
+   cd ezgb
+   luarocks make lua-ezgb-scm-1.rockspec
+
+This installs ``ezgb.lua`` to the standard Lua module path (typically
+``/usr/share/lua/5.4/`` or ``~/.luarocks/share/lua/5.4/``).
+
+Verify
+^^^^^^
+
+.. code-block:: lua
+
+   $ lua -e 'local ezgb = require("ezgb"); print("ok")'
+   ok

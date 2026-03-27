@@ -74,7 +74,6 @@ If you know the bug ID (or an unambiguous prefix), use
    print(bug.title)          # 'Login page is broken'
    print(bug.status)         # Status.OPEN
    print(bug.creator.name)   # 'Alice'
-   print(bug.assigned_to)    # 'bob@example.com'
    print(bug.labels)         # {'area/web', 'priority/high'}
 
    for comment in bug.comments:
@@ -131,15 +130,27 @@ Working with labels
    repo.add_label(bug.id, 'priority/high')
    repo.remove_label(bug.id, 'priority/high')
 
-Assigning bugs
+Removing a bug
 --------------
 
-Assignment is tracked through ``assigned:email`` labels:
+To permanently delete a bug (this is irreversible):
 
 .. code-block:: python
 
-   repo.assign(bug.id, 'alice@example.com')
-   repo.unassign(bug.id)
+   repo.remove_bug(bug.id)
+
+Syncing with a remote
+---------------------
+
+Push and pull git-bug data to/from a remote:
+
+.. code-block:: python
+
+   # Push bugs and identities
+   returncode, stdout, stderr = repo.push('origin')
+
+   # Pull and merge (caches are invalidated automatically)
+   returncode, stdout, stderr = repo.pull('origin')
 
 Reading attachments
 -------------------
