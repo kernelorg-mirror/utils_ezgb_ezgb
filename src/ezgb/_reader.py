@@ -287,9 +287,16 @@ class BugReader:
 
     # -- Operation pack parsing ----------------------------------------------
 
-    def _get_op_packs(self, bid: str) -> list[dict[str, Any]]:
-        """Walk the commit chain for a bug and return operation packs,
-        oldest first.
+    def _get_op_packs(
+        self, bid: str,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Walk the commit chain for a bug and return operation packs
+        (oldest first) together with the raw blob strings.
+
+        Returns ``(packs, raw_blobs)`` where each element in
+        *raw_blobs* is the original JSON text of the corresponding
+        pack.  The raw strings are needed for correct operation
+        hashing.
         """
         bid = self.resolve_bug_id(bid)
         ecode, output = git_run(self._repo, [
@@ -297,14 +304,15 @@ class BugReader:
             '--reverse', 'refs/bugs/' + bid,
         ])
         if ecode != 0 or not isinstance(output, str):
-            return []
+            return [], []
         self._check_format_version(output, 'version-', SUPPORTED_BUG_FORMAT)
         entries = self._parse_log_raw(output)
         if not entries:
-            return []
+            return [], []
         blob_hashes = [h for _, h in entries]
         blobs = self._batch_cat_blobs(blob_hashes)
         packs: list[dict[str, Any]] = []
+        raw_blobs: list[str] = []
         for _commit, blob_hash in entries:
             raw = blobs.get(blob_hash)
             if raw is None:
@@ -318,7 +326,8 @@ class BugReader:
                 )
                 continue
             packs.append(pack)
-        return packs
+            raw_blobs.append(raw)
+        return packs, raw_blobs
 
     # -- Identity resolution -------------------------------------------------
 
@@ -383,13 +392,59 @@ class BugReader:
     # -- Bug snapshot building -----------------------------------------------
 
     @staticmethod
-    def _op_hash(op: dict[str, Any]) -> str:
+    def _op_hash(raw_op_json: str) -> str:
         """Compute a git-bug compatible operation ID.
 
         git-bug derives IDs as SHA256 of the compact JSON serialization.
+        The raw JSON string from the blob must be used (not a
+        re-serialized version) because Go's ``json.Marshal`` escapes
+        characters like ``<``, ``>``, ``&`` as ``\\u003c`` etc., and
+        Python's ``json.dumps`` does not reproduce that encoding.
         """
-        raw = json.dumps(op, separators=(',', ':')).encode()
-        return hashlib.sha256(raw).hexdigest()
+        return hashlib.sha256(raw_op_json.encode()).hexdigest()
+
+    @staticmethod
+    def _extract_raw_ops(blob_json: str) -> list[str]:
+        """Extract individual operation JSON strings from an ops blob.
+
+        git-bug identifies each operation by hashing its JSON
+        serialization with SHA-256.  The serialization is produced by
+        Go's ``json.Marshal``, which escapes ``<``, ``>``, and ``&``
+        as ``\\u003c``, ``\\u003e``, ``\\u0026`` — a Go-specific
+        behaviour that Python's ``json.dumps`` does not reproduce.
+        Re-serializing in Python therefore produces different bytes
+        and a different hash, which silently breaks
+        ``OP_EDIT_COMMENT`` matching (the ``target`` field carries the
+        Go-computed hash).
+
+        To get correct hashes we must use the exact bytes that
+        git-bug wrote.  This method locates each op object inside the
+        original blob string using :meth:`json.JSONDecoder.raw_decode`
+        and slices the string at those boundaries, preserving Go's
+        escaping verbatim.
+        """
+        decoder = json.JSONDecoder()
+        try:
+            pack, _ = decoder.raw_decode(blob_json)
+        except json.JSONDecodeError:
+            return []
+        raw_ops = pack.get('ops')
+        if not raw_ops:
+            return []
+        # Walk forward through the string to slice each op.
+        # Find the start of the ops array value.
+        idx = blob_json.find('"ops"')
+        pos = blob_json.find('[', idx) + 1
+        ops: list[str] = []
+        for _ in raw_ops:
+            # raw_decode skips leading whitespace on its own, but
+            # we need to step past commas between elements.
+            while blob_json[pos] in ' \t\n\r,':
+                pos += 1
+            _, end_pos = decoder.raw_decode(blob_json, pos)
+            ops.append(blob_json[pos:end_pos])
+            pos = end_pos
+        return ops
 
     @staticmethod
     def _format_timestamp(unix_ts: int) -> datetime:
@@ -419,6 +474,7 @@ class BugReader:
     def build_bug(
         self, bid: str,
         packs: list[dict[str, Any]] | None = None,
+        raw_blobs: list[str] | None = None,
     ) -> Bug:
         """Reconstruct a bug snapshot by replaying operation packs.
 
@@ -429,9 +485,16 @@ class BugReader:
             return self._bug_cache[bid]
 
         if packs is None:
-            packs = self._get_op_packs(bid)
+            packs, raw_blobs = self._get_op_packs(bid)
         if not packs:
             raise BugNotFoundError('no operation packs for bug %s' % bid)
+        if raw_blobs is None:
+            raw_blobs = []
+
+        # Extract raw op JSON strings from each blob for hashing
+        raw_ops_per_pack: list[list[str]] = [
+            self._extract_raw_ops(blob) for blob in raw_blobs
+        ]
 
         title = ''
         is_open = True
@@ -444,12 +507,16 @@ class BugReader:
         # Map operation hashes to Comment objects for OP_EDIT_COMMENT
         op_hash_map: dict[str, Comment] = {}
 
-        for pack in packs:
+        for pack_idx, pack in enumerate(packs):
             author_id = pack.get('author', {}).get('id', '')
-            for op in pack.get('ops', []):
+            raw_ops = (raw_ops_per_pack[pack_idx]
+                       if pack_idx < len(raw_ops_per_pack) else [])
+            for op_idx, op in enumerate(pack.get('ops', [])):
                 op_type = op.get('type', 0)
                 timestamp = op.get('timestamp', 0)
-                op_id = self._op_hash(op)
+                raw_json = (raw_ops[op_idx]
+                            if op_idx < len(raw_ops) else '')
+                op_id = self._op_hash(raw_json) if raw_json else ''
 
                 if op_type == OP_CREATE:
                     title = op.get('title', '')
@@ -572,6 +639,7 @@ class BugReader:
 
         for bid, entries in bug_entries.items():
             packs: list[dict[str, Any]] = []
+            raw_blobs: list[str] = []
             for _commit, blob_hash in entries:
                 raw = blobs.get(blob_hash)
                 if raw is None:
@@ -585,9 +653,10 @@ class BugReader:
                     )
                     continue
                 packs.append(pack)
+                raw_blobs.append(raw)
             if packs:
                 try:
-                    self.build_bug(bid, packs=packs)
+                    self.build_bug(bid, packs=packs, raw_blobs=raw_blobs)
                 except BugNotFoundError:
                     continue
 
