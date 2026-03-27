@@ -524,13 +524,6 @@ class BugReader:
                 elif op_type == OP_NOOP:
                     pass  # No-op, used for bridge metadata
 
-        # Synthesise assigned_to from assigned:USER label
-        assigned_to = ''
-        for lbl in labels:
-            if lbl.startswith('assigned:'):
-                assigned_to = lbl[len('assigned:'):]
-                break
-
         # Use a fallback identity if somehow no OP_CREATE was found
         if creator is None:
             creator = Identity(id='unknown', name='unknown', email='unknown')
@@ -545,7 +538,6 @@ class BugReader:
             created_at=created_at,
             labels=labels,
             comments=comments,
-            assigned_to=assigned_to,
             metadata=metadata,
         )
         self._bug_cache[bid] = bug

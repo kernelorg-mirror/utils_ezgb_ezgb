@@ -117,24 +117,3 @@ class BugWriter:
             raise CliError('git bug label rm failed: %s' % err)
         self._reader.invalidate(bid)
 
-    def assign(self, bid: str, email: str) -> None:
-        """Assign a bug to an email address.
-
-        Removes any existing ``assigned:*`` labels and adds a new
-        ``assigned:{email}`` label.
-        """
-        bid = self._reader.resolve_bug_id(bid)
-        # Remove existing assignment labels
-        bug = self._reader.build_bug(bid)
-        for lbl in bug.labels:
-            if lbl.startswith('assigned:'):
-                self.remove_label(bid, lbl)
-        self.add_label(bid, 'assigned:%s' % email)
-
-    def unassign(self, bid: str) -> None:
-        """Remove any assignment from a bug."""
-        bid = self._reader.resolve_bug_id(bid)
-        bug = self._reader.build_bug(bid)
-        for lbl in bug.labels:
-            if lbl.startswith('assigned:'):
-                self.remove_label(bid, lbl)

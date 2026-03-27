@@ -100,5 +100,4 @@ class Bug:
     created_at: datetime
     labels: set[str]
     comments: list[Comment]
-    assigned_to: str = ''
     metadata: dict[str, str] = field(default_factory=dict)

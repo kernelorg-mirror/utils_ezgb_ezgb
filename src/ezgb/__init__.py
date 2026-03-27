@@ -200,14 +200,6 @@ class GitBugRepo:
         """Remove a label from a bug."""
         self._writer.remove_label(bid, label)
 
-    def assign(self, bid: str, email: str) -> None:
-        """Assign a bug to an email address."""
-        self._writer.assign(bid, email)
-
-    def unassign(self, bid: str) -> None:
-        """Remove any assignment from a bug."""
-        self._writer.unassign(bid)
-
     # -- Cache management ----------------------------------------------------
 
     def invalidate(self, bid: str | None = None) -> None:
