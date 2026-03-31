@@ -16,8 +16,6 @@ description = {
 }
 dependencies = {
    "lua >= 5.1",
-   "lua-git2",
-   "luaossl",
 }
 build = {
    type = "builtin",
