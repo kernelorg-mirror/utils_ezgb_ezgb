@@ -593,6 +593,74 @@ function M.build_bug(bid)
     }
 end
 
+function M.build_bug_summary(bid)
+    local full_id, err = M.resolve_bug_id(bid)
+    if not full_id then return nil, err end
+
+    local packs = get_op_packs(full_id)
+    if not packs then return nil, "failed to read op packs for " .. full_id end
+    if #packs == 0 then
+        return nil, "no operation packs for bug " .. full_id
+    end
+
+    local title = ""
+    local is_open = true
+    local creator_id = ""
+    local created_at = 0
+    local labels = {}
+    local comment_count = 0
+
+    for _, pack in ipairs(packs) do
+        local author_id = ""
+        local author_tbl = jval(pack.author, nil)
+        if author_tbl then
+            author_id = jval(author_tbl.id, "")
+        end
+        local ops = jval(pack.ops, {})
+
+        for _, op in ipairs(ops) do
+            local op_type = jval(op.type, 0)
+
+            if op_type == M.OP_CREATE then
+                title = jval(op.title, "")
+                creator_id = author_id
+                created_at = jval(op.timestamp, 0)
+                if jval(op.message, "") ~= "" then
+                    comment_count = comment_count + 1
+                end
+
+            elseif op_type == M.OP_SET_TITLE then
+                title = jval(op.title, title)
+
+            elseif op_type == M.OP_ADD_COMMENT then
+                comment_count = comment_count + 1
+
+            elseif op_type == M.OP_SET_STATUS then
+                local status_val = jval(op.status, M.STATUS_OPEN)
+                is_open = (status_val == M.STATUS_OPEN)
+
+            elseif op_type == M.OP_LABEL_CHANGE then
+                for _, lbl in ipairs(jval(op.added, {})) do
+                    labels[lbl] = true
+                end
+                for _, lbl in ipairs(jval(op.removed, {})) do
+                    labels[lbl] = nil
+                end
+            end
+        end
+    end
+
+    return {
+        id            = full_id,
+        title         = title,
+        status        = is_open and M.STATUS_OPEN or M.STATUS_CLOSED,
+        creator_id    = creator_id,
+        created_at    = created_at,
+        labels        = labels,
+        comment_count = comment_count,
+    }
+end
+
 -- ── Cache management ──────────────────────────────────────────────────
 
 function M.clear_cache()

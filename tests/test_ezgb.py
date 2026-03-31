@@ -28,6 +28,7 @@ from conftest import (
 from ezgb import (
     AmbiguousBugIdError,
     BugNotFoundError,
+    BugSummary,
     GitBugRepo,
     Status,
     UnsupportedFormatError,
@@ -395,6 +396,116 @@ class TestBuildBug:
 
 
 # ------------------------------------------------------------------
+# Bug summary (lightweight list-view snapshot)
+# ------------------------------------------------------------------
+
+class TestBuildBugSummary:
+    def test_basic(self, reader, mock_git):
+        setup_single_bug(mock_git, reader)
+        s = reader.build_bug_summary(BUG_ID)
+        assert isinstance(s, BugSummary)
+        assert s.id == BUG_ID
+        assert s.title == 'Test bug'
+        assert s.status == Status.OPEN
+        assert s.creator_id == IDENTITY_ID
+        assert s.comment_count == 1  # create op has a message
+
+    def test_set_title(self, reader, mock_git):
+        title_op = make_set_title_op('Updated title')
+        setup_single_bug(mock_git, reader, extra_ops=[title_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.title == 'Updated title'
+
+    def test_set_status(self, reader, mock_git):
+        status_op = make_set_status_op(2)  # CLOSED
+        setup_single_bug(mock_git, reader, extra_ops=[status_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.status == Status.CLOSED
+
+    def test_label_changes(self, reader, mock_git):
+        add_op = make_label_change_op(added=['bug', 'priority/high'])
+        rm_op = make_label_change_op(
+            removed=['bug'], timestamp=1700005000,
+        )
+        setup_single_bug(mock_git, reader, extra_ops=[add_op, rm_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert 'priority/high' in s.labels
+        assert 'bug' not in s.labels
+        assert isinstance(s.labels, frozenset)
+
+    def test_comment_count(self, reader, mock_git):
+        comment_op = make_comment_op('A follow-up')
+        setup_single_bug(mock_git, reader, extra_ops=[comment_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.comment_count == 2  # create message + add_comment
+
+    def test_create_without_message(self, reader, mock_git):
+        ops = [make_create_op('No body', '')]
+        pack_json = make_op_pack(IDENTITY_ID, ops)
+        commit_hash = 'dead' * 10
+        ops_blob = 'f00d' * 10
+        log_raw = format_log_raw(commit_hash, ops_blob)
+        mock_git.run_routes['refs/bugs/%s' % BUG_ID] = (0, log_raw)
+        mock_git.batch_blobs[ops_blob] = pack_json
+        reader._resolve_cache[BUG_ID] = BUG_ID
+        setup_identity(mock_git, IDENTITY_ID, 'Alice', 'alice@example.com')
+
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.comment_count == 0
+
+    def test_edit_comment_does_not_affect_count(self, reader, mock_git):
+        edit_op = make_edit_comment_op(
+            target='whatever', message='Edited',
+        )
+        setup_single_bug(mock_git, reader, extra_ops=[edit_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.comment_count == 1  # only the create message
+
+    def test_metadata_skipped(self, reader, mock_git):
+        meta_op = make_set_metadata_op({'key': 'value'})
+        setup_single_bug(mock_git, reader, extra_ops=[meta_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert not hasattr(s, 'metadata')
+
+    def test_noop_ignored(self, reader, mock_git):
+        noop = make_noop_op()
+        setup_single_bug(mock_git, reader, extra_ops=[noop])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.title == 'Test bug'
+
+    def test_caching(self, reader, mock_git):
+        setup_single_bug(mock_git, reader)
+        s1 = reader.build_bug_summary(BUG_ID)
+        s2 = reader.build_bug_summary(BUG_ID)
+        assert s1 is s2
+
+    def test_separate_cache(self, reader, mock_git):
+        setup_single_bug(mock_git, reader)
+        reader.build_bug_summary(BUG_ID)
+        assert BUG_ID in reader._summary_cache
+        assert BUG_ID not in reader._bug_cache
+
+    def test_missing_raises(self, reader, mock_git):
+        reader._resolve_cache['nonexistent'] = 'nonexistent'
+        mock_git.run_routes['refs/bugs/nonexistent'] = (0, '')
+        with pytest.raises(BugNotFoundError, match='no operation packs'):
+            reader.build_bug_summary('nonexistent')
+
+    def test_invalidate_single(self, reader, mock_git):
+        setup_single_bug(mock_git, reader)
+        reader.build_bug_summary(BUG_ID)
+        assert BUG_ID in reader._summary_cache
+        reader.invalidate(BUG_ID)
+        assert BUG_ID not in reader._summary_cache
+
+    def test_invalidate_all(self, reader, mock_git):
+        setup_single_bug(mock_git, reader)
+        reader.build_bug_summary(BUG_ID)
+        reader.invalidate()
+        assert reader._summary_cache == {}
+
+
+# ------------------------------------------------------------------
 # Prefetch
 # ------------------------------------------------------------------
 
@@ -741,6 +852,56 @@ class TestGitBugRepo:
         assert BUG_ID not in repo._reader._bug_cache
         bug = next(it)
         assert bug.title == 'Test bug'
+
+    def test_list_bug_summaries(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+        summaries = repo.list_bug_summaries()
+        assert len(summaries) == 1
+        assert isinstance(summaries[0], BugSummary)
+        assert summaries[0].title == 'Test bug'
+        assert summaries[0].creator_id == IDENTITY_ID
+
+    def test_list_bug_summaries_filter_status(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        status_op = make_set_status_op(2)  # CLOSED
+        setup_single_bug(mock_git, repo._reader, extra_ops=[status_op])
+
+        assert len(repo.list_bug_summaries(status=Status.OPEN)) == 0
+        repo.invalidate()
+        assert len(repo.list_bug_summaries(status=Status.CLOSED)) == 1
+
+    def test_list_bug_summaries_filter_label(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        label_op = make_label_change_op(added=['area/network'])
+        setup_single_bug(mock_git, repo._reader, extra_ops=[label_op])
+
+        assert len(repo.list_bug_summaries(label='area/network')) == 1
+        repo.invalidate()
+        assert len(repo.list_bug_summaries(label='nonexistent')) == 0
+
+    def test_iter_bug_summaries(self, mock_git):
+        repo = GitBugRepo(REPO_PATH)
+        commit = 'dead' * 10
+        mock_git.lines_routes['refs/bugs/'] = [
+            'bugs/%s %s' % (BUG_ID, commit),
+        ]
+        setup_single_bug(mock_git, repo._reader)
+        summaries = list(repo.iter_bug_summaries())
+        assert len(summaries) == 1
+        assert summaries[0].title == 'Test bug'
 
     def test_get_attachment(self, mock_git):
         repo = GitBugRepo(REPO_PATH)

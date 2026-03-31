@@ -27,6 +27,7 @@ from ezgb._models import (
     AmbiguousBugIdError,
     Bug,
     BugNotFoundError,
+    BugSummary,
     Comment,
     Identity,
     Status,
@@ -68,6 +69,7 @@ class BugReader:
     def __init__(self, repo_path: str) -> None:
         self._repo = repo_path
         self._bug_cache: dict[str, Bug] = {}
+        self._summary_cache: dict[str, BugSummary] = {}
         self._identity_cache: dict[str, Identity] = {}
         self._resolve_cache: dict[str, str] = {}
 
@@ -610,6 +612,78 @@ class BugReader:
         self._bug_cache[bid] = bug
         return bug
 
+    def build_bug_summary(
+        self, bid: str,
+        packs: list[dict[str, Any]] | None = None,
+    ) -> BugSummary:
+        """Build a lightweight bug summary by replaying operation packs.
+
+        Unlike :meth:`build_bug`, this skips op hashing, comment text,
+        EditComment replay, metadata, and per-op identity resolution.
+        Only the raw *creator_id* string is stored; batch-resolve
+        identities separately after collecting summaries.
+        """
+        bid = self.resolve_bug_id(bid)
+        if bid in self._summary_cache:
+            return self._summary_cache[bid]
+
+        if packs is None:
+            packs, _raw_blobs = self._get_op_packs(bid)
+        if not packs:
+            raise BugNotFoundError('no operation packs for bug %s' % bid)
+
+        title = ''
+        is_open = True
+        creator_id = ''
+        created_at: datetime | None = None
+        labels: set[str] = set()
+        comment_count = 0
+
+        for pack in packs:
+            author_id = pack.get('author', {}).get('id', '')
+            for op in pack.get('ops', []):
+                op_type = op.get('type', 0)
+
+                if op_type == OP_CREATE:
+                    title = op.get('title', '')
+                    creator_id = author_id
+                    created_at = self._format_timestamp(
+                        op.get('timestamp', 0),
+                    )
+                    if op.get('message', ''):
+                        comment_count += 1
+
+                elif op_type == OP_SET_TITLE:
+                    title = op.get('title', title)
+
+                elif op_type == OP_ADD_COMMENT:
+                    comment_count += 1
+
+                elif op_type == OP_SET_STATUS:
+                    status_val = op.get('status', STATUS_OPEN)
+                    is_open = (status_val == STATUS_OPEN)
+
+                elif op_type == OP_LABEL_CHANGE:
+                    for lbl in op.get('added') or []:
+                        labels.add(lbl)
+                    for lbl in op.get('removed') or []:
+                        labels.discard(lbl)
+
+        if created_at is None:
+            created_at = datetime.fromtimestamp(0, tz=timezone.utc)
+
+        summary = BugSummary(
+            id=bid,
+            title=title,
+            status=Status.OPEN if is_open else Status.CLOSED,
+            creator_id=creator_id,
+            created_at=created_at,
+            labels=frozenset(labels),
+            comment_count=comment_count,
+        )
+        self._summary_cache[bid] = summary
+        return summary
+
     def prefetch_bugs(self, bids: list[str]) -> None:
         """Warm the cache for multiple bugs using batched blob reads.
 
@@ -674,7 +748,9 @@ class BugReader:
             except (BugNotFoundError, AmbiguousBugIdError):
                 full_bid = bid
             self._bug_cache.pop(full_bid, None)
+            self._summary_cache.pop(full_bid, None)
         else:
             self._bug_cache.clear()
+            self._summary_cache.clear()
             self._identity_cache.clear()
             self._resolve_cache.clear()

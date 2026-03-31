@@ -101,3 +101,20 @@ class Bug:
     labels: set[str]
     comments: list[Comment]
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BugSummary:
+    """Lightweight bug snapshot for list views.
+
+    Contains only the fields needed for display in listings.
+    Identity resolution is deferred -- *creator_id* holds the raw
+    identity hash string rather than a resolved Identity object.
+    """
+    id: str
+    title: str
+    status: Status
+    creator_id: str
+    created_at: datetime
+    labels: frozenset[str]
+    comment_count: int

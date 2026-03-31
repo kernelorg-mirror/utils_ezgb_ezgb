@@ -12,6 +12,7 @@ from ezgb._models import (
     AmbiguousBugIdError,
     Bug,
     BugNotFoundError,
+    BugSummary,
     CliError,
     Comment,
     EzgbError,
@@ -27,6 +28,7 @@ from ezgb._writer import BugWriter
 __all__ = [
     'GitBugRepo',
     'Bug',
+    'BugSummary',
     'Comment',
     'Identity',
     'Status',
@@ -120,6 +122,46 @@ class GitBugRepo:
             if label is not None and label not in bug.labels:
                 continue
             yield bug
+
+    def list_bug_summaries(
+        self,
+        *,
+        status: Status | None = None,
+        label: str | None = None,
+        since: str | datetime | int | None = None,
+    ) -> list[BugSummary]:
+        """List lightweight bug summaries, optionally filtered.
+
+        Much cheaper than :meth:`list_bugs` because identity resolution
+        and comment text are skipped.
+        """
+        return list(self.iter_bug_summaries(
+            status=status, label=label, since=since,
+        ))
+
+    def iter_bug_summaries(
+        self,
+        *,
+        status: Status | None = None,
+        label: str | None = None,
+        since: str | datetime | int | None = None,
+    ) -> Iterator[BugSummary]:
+        """Lazily iterate over bug summaries.
+
+        Accepts the same filters as :meth:`list_bug_summaries`.
+        """
+        ts = self._since_to_ts(since)
+        refs = self._reader.list_bug_refs(since=ts)
+        for bid, _commit in refs:
+            try:
+                summary = self._reader.build_bug_summary(bid)
+            except BugNotFoundError:
+                continue
+            if status is not None and summary.status != status:
+                continue
+            if label is not None and label not in summary.labels:
+                continue
+            yield summary
 
     def get_bug(self, bid: str) -> Bug:
         """Get a single bug by ID (full or abbreviated)."""
