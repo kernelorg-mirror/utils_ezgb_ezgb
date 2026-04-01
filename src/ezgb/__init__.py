@@ -132,12 +132,89 @@ class GitBugRepo:
     ) -> list[BugSummary]:
         """List lightweight bug summaries, optionally filtered.
 
-        Much cheaper than :meth:`list_bugs` because identity resolution
-        and comment text are skipped.
+        Uses the git-bug CLI cache when available (~100ms for
+        hundreds of bugs). Falls back to native git object reads
+        when the CLI is not installed or the cache is empty.
         """
+        # Fast path: try the git-bug CLI cache
+        if since is None:
+            cached = self._list_summaries_from_cli()
+            if cached is not None:
+                results = cached
+                if status is not None:
+                    results = [s for s in results
+                               if s.status == status]
+                if label is not None:
+                    results = [s for s in results
+                               if label in s.labels]
+                return results
+        # Slow path: native git object reads
         return list(self.iter_bug_summaries(
             status=status, label=label, since=since,
         ))
+
+    def _list_summaries_from_cli(self) -> list[BugSummary] | None:
+        """Try to list summaries via the git-bug CLI cache.
+
+        Returns None if the CLI is unavailable or returns an error,
+        signalling the caller to fall back to native reads.
+        """
+        import json
+        import shutil
+
+        if shutil.which('git-bug') is None:
+            return None
+
+        from ezgb._git import git_bug_cli
+        ecode, out, _err = git_bug_cli(
+            self._repo, ['bug', '-f', 'json'])
+        if ecode != 0 or not out.strip():
+            return None
+        try:
+            raw_bugs: list[dict[str, object]] = json.loads(out)
+        except json.JSONDecodeError:
+            return None
+        results: list[BugSummary] = []
+        for raw in raw_bugs:
+            bid = str(raw.get('id', ''))
+            if not bid:
+                continue
+            status_str = str(raw.get('status', 'open'))
+            bug_status = (Status.CLOSED if status_str == 'closed'
+                          else Status.OPEN)
+            create_time = raw.get('create_time') or {}
+            edit_time = raw.get('edit_time') or {}
+            ct = (create_time.get('timestamp', 0)
+                  if isinstance(create_time, dict) else 0)
+            et = (edit_time.get('timestamp', 0)
+                  if isinstance(edit_time, dict) else 0)
+            author = raw.get('author') or {}
+            author_name = (author.get('name', '')
+                           if isinstance(author, dict) else '')
+            author_id = (author.get('id', '')
+                         if isinstance(author, dict) else '')
+            raw_labels = raw.get('labels') or []
+            if isinstance(raw_labels, list):
+                labels = frozenset(str(lb) for lb in raw_labels)
+            else:
+                labels = frozenset()
+            comment_count = raw.get('comments', 0)
+            if not isinstance(comment_count, int):
+                comment_count = 0
+            results.append(BugSummary(
+                id=bid,
+                title=str(raw.get('title', '')),
+                status=bug_status,
+                creator_id=str(author_id),
+                created_at=datetime.fromtimestamp(
+                    int(ct), tz=timezone.utc),
+                labels=labels,
+                comment_count=comment_count,
+                author_name=author_name,
+                edited_at=datetime.fromtimestamp(
+                    int(et), tz=timezone.utc),
+            ))
+        return results
 
     def iter_bug_summaries(
         self,

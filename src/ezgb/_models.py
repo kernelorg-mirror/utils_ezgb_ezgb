@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+
+_EPOCH_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 # -- Exceptions --------------------------------------------------------------
 
@@ -110,6 +112,10 @@ class BugSummary:
     Contains only the fields needed for display in listings.
     Identity resolution is deferred -- *creator_id* holds the raw
     identity hash string rather than a resolved Identity object.
+
+    When populated from the git-bug CLI cache, *author_name* and
+    *edited_at* are available. When built from native git objects,
+    these may be empty/epoch if identity resolution was skipped.
     """
     id: str
     title: str
@@ -118,3 +124,5 @@ class BugSummary:
     created_at: datetime
     labels: frozenset[str]
     comment_count: int
+    author_name: str = ''
+    edited_at: datetime = _EPOCH_UTC
