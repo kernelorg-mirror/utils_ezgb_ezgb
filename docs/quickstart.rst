@@ -97,6 +97,25 @@ Creating a bug
 
    Write operations need the ``git bug`` CLI on your ``$PATH``.
 
+Lightweight summaries for list views
+------------------------------------
+
+For list views where you don't need full comment data, use
+:meth:`~ezgb.GitBugRepo.list_bug_summaries`. This is much faster
+than ``list_bugs`` because it uses the git-bug CLI cache when
+available (~100ms vs seconds for large repositories):
+
+.. code-block:: python
+
+   summaries = repo.list_bug_summaries(status=Status.OPEN)
+   for s in summaries:
+       print(f'{s.id[:7]} {s.author_name} {s.title}')
+       print(f'  {s.comment_count} comments, last changed {s.edited_at}')
+
+Each item is a :class:`~ezgb.BugSummary` dataclass with ``id``,
+``title``, ``status``, ``labels``, ``created_at``, ``edited_at``,
+``author_name``, and ``comment_count``.
+
 Adding comments
 ---------------
 
@@ -104,6 +123,21 @@ Adding comments
 
    comment = repo.add_comment(bug.id, 'I can reproduce this on Fedora 41.')
    print(comment.count)  # 1 (the first comment after the description)
+
+Editing comments
+----------------
+
+Use :meth:`~ezgb.GitBugRepo.edit_comment` to replace a comment's text.
+This is useful for tombstoning comments (data removal) while preserving
+the comment's identity in the operation history:
+
+.. code-block:: python
+
+   # Replace a comment's text
+   repo.edit_comment(bug.id, comment.id, 'Updated text')
+
+   # Tombstone a comment (remove content but keep the ID)
+   repo.edit_comment(bug.id, comment.id, 'X-B4-Bug-Comment: removed')
 
 Changing status
 ---------------

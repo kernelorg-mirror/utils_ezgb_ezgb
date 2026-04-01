@@ -22,6 +22,13 @@ Bug
    :members:
    :undoc-members:
 
+BugSummary
+^^^^^^^^^^
+
+.. autoclass:: ezgb.BugSummary
+   :members:
+   :undoc-members:
+
 Comment
 ^^^^^^^
 

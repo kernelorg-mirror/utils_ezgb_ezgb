@@ -14,8 +14,12 @@ Design principle: read fast, write safe
 
 ezgb splits its work into two paths:
 
-- **Reads** go directly to git objects. This avoids spawning the
-  ``git-bug`` binary for every lookup and makes bulk operations fast.
+- **Reads** go directly to git objects via pygit2 (libgit2 bindings).
+  This avoids spawning subprocesses for every lookup and makes bulk
+  operations fast.
+- **Listing** uses the git-bug CLI excerpt cache when available
+  (~100ms for hundreds of bugs). Falls back to native reads when the
+  CLI is not installed.
 - **Writes** go through the ``git bug`` CLI. The CLI maintains Lamport
   clocks and the operation DAG, so bypassing it would risk corrupting
   the data.
@@ -28,8 +32,8 @@ Python::
    src/ezgb/
      __init__.py   GitBugRepo facade and public API
      _models.py    Dataclasses, enums, exceptions, constants
-     _git.py       Thin subprocess wrappers for git and git-bug
-     _reader.py    BugReader: reads and caches bug data from git objects
+     _git.py       Subprocess wrapper for git-bug CLI (write ops)
+     _reader.py    BugReader: reads and caches bug data via pygit2
      _writer.py    BugWriter: delegates mutations to the git-bug CLI
 
 Lua::
@@ -83,17 +87,15 @@ How reading works
 
 When you call ``repo.get_bug(bid)``, the following happens:
 
-1. **Resolve the ID.** If ``bid`` is a short prefix, ezgb calls
-   ``git for-each-ref`` to find the matching full ID under
-   ``refs/bugs/``.
+1. **Resolve the ID.** If ``bid`` is a short prefix, ezgb iterates
+   ``refs/bugs/`` references via pygit2 to find the matching full ID.
 
-2. **Walk the commit chain.** ``git log --raw --full-index --reverse``
-   gives us every commit and the hash of its ``ops`` blob, oldest
-   first.
+2. **Walk the commit chain.** pygit2 follows the commit parent chain
+   from the ref tip back to the root, collecting the ``ops`` blob from
+   each commit's tree (oldest first).
 
-3. **Batch-read the blobs.** All ``ops`` blob hashes are sent to
-   ``git cat-file --batch`` in a single call. This is much faster
-   than reading each blob one by one.
+3. **Read the blobs.** Each ``ops`` blob is read directly from the
+   repository's object database via pygit2 -- no subprocess overhead.
 
 4. **Replay the operations.** Each operation pack is parsed as JSON
    and its operations are applied in sequence to build a
@@ -106,6 +108,16 @@ When you call ``repo.get_bug(bid)``, the following happens:
 Identity resolution follows a similar pattern: read the latest
 ``version`` blob from the identity's commit chain and parse it.
 
+Fast listing with the CLI cache
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~ezgb.GitBugRepo.list_bug_summaries` transparently uses the
+git-bug CLI's pre-built excerpt cache when available. This runs
+``git bug -f json`` which reads the gob-encoded cache at
+``.git/git-bug/cache/bugs`` and returns all bug metadata in ~100ms,
+regardless of repository size. The method falls back to native pygit2
+reads when the CLI is not installed or when a ``since`` filter is used.
+
 How writing works
 -----------------
 
@@ -115,8 +127,8 @@ All write methods go through the same path:
 2. Check the exit code. If non-zero, raise :class:`~ezgb.CliError`.
 3. Invalidate the reader's cache for the affected bug (or all bugs, in
    the case of ``create_bug``).
-4. Re-read the bug from git objects so the caller gets an up-to-date
-   snapshot.
+4. Re-read the bug from git objects (via pygit2) so the caller gets an
+   up-to-date snapshot.
 
 This means the ``git-bug`` binary must be installed for any write
 operation.

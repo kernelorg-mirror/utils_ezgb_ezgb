@@ -12,9 +12,10 @@ Requirements
 ^^^^^^^^^^^^
 
 - **Python 3.9** or later.
-- **git** must be on your ``$PATH``.
+- **pygit2** -- Python bindings for libgit2 (``pip install pygit2``).
 - **git-bug** (v0.10 or later) must be on your ``$PATH`` if you want to
-  create or modify bugs. Reading existing bugs only needs ``git``.
+  create or modify bugs, or to use the fast CLI-cache listing path.
+  Reading existing bugs only needs pygit2.
 
 Install from source
 ^^^^^^^^^^^^^^^^^^^
