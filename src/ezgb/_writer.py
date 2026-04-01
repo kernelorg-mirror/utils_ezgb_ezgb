@@ -76,6 +76,22 @@ class BugWriter:
         bug = self._reader.build_bug(bid)
         return bug.comments[-1]
 
+    def edit_comment(self, bid: str, comment_id: str, text: str) -> None:
+        """Edit a comment's text.
+
+        *bid* is the bug ID (for cache invalidation).
+        *comment_id* is the combined comment ID from ``Comment.id``.
+        """
+        bid = self._reader.resolve_bug_id(bid)
+        args = [
+            'bug', 'comment', 'edit', comment_id,
+            '-m', text, '--non-interactive',
+        ]
+        ecode, out, err = self._cli(args)
+        if ecode != 0:
+            raise CliError('git bug comment edit failed: %s' % err)
+        self._reader.invalidate(bid)
+
     def set_status(self, bid: str, status: Status) -> None:
         """Set a bug's status to open or closed."""
         bid = self._reader.resolve_bug_id(bid)

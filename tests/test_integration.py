@@ -101,6 +101,41 @@ class TestComments:
         assert counts == [0, 1, 2, 3]
 
 
+class TestEditComment:
+    def test_edit_comment_text(self, gb_repo):
+        bug = gb_repo.create_bug('Edit comment test', 'Original body')
+        comment = gb_repo.add_comment(bug.id, 'Original follow-up')
+
+        gb_repo.edit_comment(bug.id, comment.id, 'Edited follow-up')
+        bug = gb_repo.get_bug(bug.id)
+        assert len(bug.comments) == 2
+        assert bug.comments[1].text == 'Edited follow-up'
+
+    def test_edit_preserves_other_comments(self, gb_repo):
+        bug = gb_repo.create_bug('Preserve test', 'c0')
+        c1 = gb_repo.add_comment(bug.id, 'c1')
+        gb_repo.add_comment(bug.id, 'c2')
+
+        gb_repo.edit_comment(bug.id, c1.id, 'c1-edited')
+        bug = gb_repo.get_bug(bug.id)
+        texts = [c.text for c in bug.comments]
+        assert texts == ['c0', 'c1-edited', 'c2']
+
+    def test_edit_to_tombstone(self, gb_repo):
+        """Simulate the b4 bugs comment removal flow."""
+        bug = gb_repo.create_bug('Tombstone test', 'Body')
+        comment = gb_repo.add_comment(bug.id, 'Sensitive content')
+        tombstone = (
+            'Message-ID: <test@example.com>\n'
+            'X-B4-Bug-Comment: removed by Test User <test@example.com>'
+        )
+        gb_repo.edit_comment(bug.id, comment.id, tombstone)
+
+        bug = gb_repo.get_bug(bug.id)
+        assert bug.comments[1].text == tombstone
+        assert 'Sensitive content' not in bug.comments[1].text
+
+
 class TestStatus:
     def test_close_and_reopen(self, gb_repo):
         bug = gb_repo.create_bug('Status test', 'Body')

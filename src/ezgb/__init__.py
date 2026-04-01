@@ -226,6 +226,10 @@ class GitBugRepo:
         """Add a comment to a bug and return the new Comment."""
         return self._writer.add_comment(bid, text)
 
+    def edit_comment(self, bid: str, comment_id: str, text: str) -> None:
+        """Edit a comment's text."""
+        self._writer.edit_comment(bid, comment_id, text)
+
     def set_status(self, bid: str, status: Status) -> None:
         """Set a bug's status to open or closed."""
         self._writer.set_status(bid, status)
