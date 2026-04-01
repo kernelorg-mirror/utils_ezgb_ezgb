@@ -1,12 +1,12 @@
 """Shared fixtures and test data factories for ezgb tests.
 
-Ported from bugspray's test_gitbug.py, adapted for ezgb's module
-structure and dataclass-based API.
+Creates real git objects in temporary bare repos using pygit2 so
+the BugReader can read them without subprocess mocking.
 """
-import hashlib
 import json
 from unittest.mock import patch
 
+import pygit2
 import pytest
 
 from ezgb._reader import BugReader
@@ -17,7 +17,9 @@ from ezgb._writer import BugWriter
 IDENTITY_ID = 'a' * 64
 IDENTITY_ID_2 = 'b' * 64
 BUG_ID = 'c' * 64
-REPO_PATH = '/srv/git/test.git'
+
+# Signature used for all test commits
+_SIG = pygit2.Signature('Test', 'test@test.com')
 
 
 # -- Test data factories -----------------------------------------------------
@@ -98,162 +100,137 @@ def make_noop_op(timestamp=1700006000):
     return {'type': 7, 'timestamp': timestamp}
 
 
-# -- Log output formatting ---------------------------------------------------
+# -- Real git object helpers -------------------------------------------------
 
-def format_log_raw(commit_hash, ops_blob):
-    """Build output matching ``git log --raw --full-index --format=%H``."""
-    return (
-        '%s\n'
-        ':100644 100644 %s %s A\tops\n'
-        ':100644 100644 %s %s A\tversion-4\n'
-        % (commit_hash, '0' * 40, ops_blob, '0' * 40, '0' * 40)
+def _create_bug_commit(repo, refname, ops_json, parent_oid=None,
+                       version_tag='version-4'):
+    """Create a single bug commit with an ops blob and version marker.
+
+    If *parent_oid* is given the new commit is chained after it.
+    Returns the new commit OID.
+    """
+    ops_blob = repo.create_blob(ops_json.encode())
+    version_blob = repo.create_blob(b'')
+
+    tb = repo.TreeBuilder()
+    tb.insert('ops', ops_blob, pygit2.GIT_FILEMODE_BLOB)
+    tb.insert(version_tag, version_blob, pygit2.GIT_FILEMODE_BLOB)
+    tree_oid = tb.write()
+
+    parents = [parent_oid] if parent_oid else []
+    return repo.create_commit(
+        refname, _SIG, _SIG, 'op pack', tree_oid, parents,
     )
 
 
-def format_identity_log_raw(commit_hash, version_blob):
-    """Build identity log output with a ``version`` entry."""
-    return (
-        '%s\n'
-        ':100644 100644 %s %s A\tversion\n'
-        % (commit_hash, '0' * 40, version_blob)
+def _create_identity_commit(repo, refname, version_json):
+    """Create an identity commit with a ``version`` blob.
+
+    Returns the commit OID.
+    """
+    version_blob = repo.create_blob(version_json.encode())
+
+    tb = repo.TreeBuilder()
+    tb.insert('version', version_blob, pygit2.GIT_FILEMODE_BLOB)
+    tree_oid = tb.write()
+
+    return repo.create_commit(
+        refname, _SIG, _SIG, 'identity', tree_oid, [],
     )
 
 
 # -- Convenience setup -------------------------------------------------------
 
-def setup_identity(mock_git, identity_id, name, email):
-    """Wire up mock routes for identity resolution.
+def setup_identity(repo_path, identity_id, name, email):
+    """Create real identity git objects in the repo at *repo_path*.
 
-    Derives unique hashes from *identity_id* so multiple identities
-    can coexist without route collisions.
+    Writes a ``refs/identities/<id>`` ref pointing at a commit whose
+    tree contains a ``version`` blob with the identity JSON.
     """
-    commit = hashlib.sha1(identity_id.encode()).hexdigest()
-    version_blob = hashlib.sha1(
-        (identity_id + ':v').encode(),
-    ).hexdigest()
-    identity_json = make_identity_version(name, email)
-
-    log_raw = format_identity_log_raw(commit, version_blob)
-    mock_git.run_routes['refs/identities/%s' % identity_id] = (
-        0, log_raw,
-    )
-    mock_git.run_routes['cat-file blob %s' % version_blob] = (
-        0, identity_json,
-    )
+    repo = pygit2.Repository(str(repo_path))
+    version_json = make_identity_version(name, email)
+    refname = 'refs/identities/%s' % identity_id
+    _create_identity_commit(repo, refname, version_json)
 
 
-def setup_single_bug(mock_git, reader, bid=BUG_ID, title='Test bug',
+def setup_single_bug(repo_path, reader, bid=BUG_ID, title='Test bug',
                      message='Bug description', timestamp=1700000000,
-                     extra_ops=None, author_id=IDENTITY_ID):
-    """Wire up mock routes for a single bug with one create op.
+                     extra_ops=None, author_id=IDENTITY_ID,
+                     extra_packs=None):
+    """Create real git objects for a single bug with one create op.
 
-    Pre-caches the bug ID in the reader's resolve cache so tests
-    don't need separate lines_routes for resolve_bug_id.
+    The bug ref ``refs/bugs/<bid>`` is created in the repo at
+    *repo_path*. The identity for *author_id* is also created.
+
+    If *extra_packs* is given, each element is a JSON string that
+    becomes an additional chained commit (for multi-pack tests).
     """
+    repo = pygit2.Repository(str(repo_path))
+    refname = 'refs/bugs/%s' % bid
+
     ops = [make_create_op(title, message, timestamp)]
     if extra_ops:
         ops.extend(extra_ops)
     pack_json = make_op_pack(author_id, ops)
 
-    commit_hash = 'dead' * 10
-    ops_blob = 'f00d' * 10
-    log_raw = format_log_raw(commit_hash, ops_blob)
+    parent = _create_bug_commit(repo, refname, pack_json)
 
-    mock_git.run_routes['refs/bugs/%s' % bid] = (0, log_raw)
-    mock_git.batch_blobs[ops_blob] = pack_json
+    if extra_packs:
+        for extra_json in extra_packs:
+            parent = _create_bug_commit(
+                repo, refname, extra_json, parent_oid=parent,
+            )
 
-    # Pre-cache bug ID resolution
+    # Pre-cache bug ID resolution so tests don't need separate
+    # ref enumeration setup.
     reader._resolve_cache[bid] = bid
 
     # Identity resolution
-    setup_identity(mock_git, author_id, 'Alice', 'alice@example.com')
+    setup_identity(repo_path, author_id, 'Alice', 'alice@example.com')
 
 
 # -- Fixtures ----------------------------------------------------------------
 
 @pytest.fixture()
-def mock_git():
-    """Patch ezgb git helpers with a routing mock.
+def repo_path(tmp_path):
+    """Create a bare git repo and return its path as a string."""
+    repo_dir = tmp_path / 'repo'
+    pygit2.init_repository(str(repo_dir), bare=True)
+    return str(repo_dir)
 
-    Returns a router whose ``.lines_routes``, ``.run_routes``, and
-    ``.batch_blobs`` dicts control mocked return values.  Route keys
-    are matched as substrings of the joined argument list.
+
+@pytest.fixture()
+def reader(repo_path):
+    """Create a BugReader pointing at the test repo."""
+    return BugReader(repo_path)
+
+
+@pytest.fixture()
+def writer(reader, repo_path):
+    """Create a BugWriter with git_bug_cli mocked.
+
+    Write operations shell out to the ``git bug`` CLI, which isn't
+    available in tests, so we mock it. The mock captures calls in
+    ``writer._cli_calls`` for assertion.
     """
-    class _Router:
-        def __init__(self):
-            self.lines_routes = {}
-            self.run_routes = {}
-            self.batch_blobs = {}
+    cli_routes = {}
+    cli_calls = []
 
-        def lines_side_effect(self, repo_path, args):
-            joined = ' '.join(args)
-            for key, value in self.lines_routes.items():
-                if key in joined:
-                    if callable(value):
-                        return value(repo_path, args)
-                    return value
-            return []
-
-        def run_side_effect(self, repo_path, args, stdin=None, decode=True):
-            joined = ' '.join(args)
-            for key, value in self.run_routes.items():
-                if key in joined:
-                    if callable(value):
-                        return value(
-                            repo_path, args, stdin=stdin, decode=decode,
-                        )
-                    return value
-            return (0, '')
-
-    router = _Router()
-
-    # Default handler for batched blob reads
-    def _batch_handler(repo_path, args, stdin=None, decode=True):
-        pieces = []
-        for line in stdin.decode().strip().splitlines():
-            h = line.strip()
-            if h in router.batch_blobs:
-                content = router.batch_blobs[h].encode()
-                hdr = ('%s blob %d\n' % (h, len(content))).encode()
-                pieces.append(hdr + content + b'\n')
-            else:
-                pieces.append(('%s missing\n' % h).encode())
-        return (0, b''.join(pieces))
-
-    router.run_routes['cat-file --batch'] = _batch_handler
-
-    # CLI side-effect for git_bug_cli (writer operations)
-    def _cli_side_effect(repo_path, args):
+    def _cli_side_effect(rp, args):
+        cli_calls.append(args)
         joined = ' '.join(args)
-        for key, value in router.run_routes.items():
+        for key, value in cli_routes.items():
             if key in joined:
                 if callable(value):
-                    result = value(None, args)
-                else:
-                    result = value
-                if len(result) == 2:
-                    return result[0], result[1], ''
-                return result
+                    return value(rp, args)
+                return value
         return (0, '', '')
 
-    with patch('ezgb._reader.git_run',
-               side_effect=router.run_side_effect), \
-         patch('ezgb._reader.git_lines',
-               side_effect=router.lines_side_effect), \
-         patch('ezgb._writer.git_bug_cli',
+    with patch('ezgb._writer.git_bug_cli',
                side_effect=_cli_side_effect), \
          patch('ezgb._git.git_bug_cli',
                side_effect=_cli_side_effect):
-        yield router
-
-
-@pytest.fixture()
-def reader():
-    """Create a BugReader for the test repo."""
-    return BugReader(REPO_PATH)
-
-
-@pytest.fixture()
-def writer(reader):
-    """Create a BugWriter for the test repo."""
-    return BugWriter(REPO_PATH, reader)
+        w = BugWriter(repo_path, reader)
+        w._cli_calls = cli_calls
+        w._cli_routes = cli_routes
+        yield w
