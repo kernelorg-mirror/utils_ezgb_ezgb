@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = 'ezgb'
-version = '0.1-dev'
+version = '0.1'
 description = 'A standalone Python library for working with git-bug repositories'
 readme = 'README.md'
 requires-python = '>=3.9'

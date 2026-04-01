@@ -1,0 +1,2 @@
+include COPYING README.md CONTRIBUTING.md DCO
+recursive-include tests *.py

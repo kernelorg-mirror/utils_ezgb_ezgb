@@ -7,14 +7,13 @@ objects -- no external database required.
 
 ## Features
 
-- **Fast reads** -- bug data is read directly from git objects using
-  `git cat-file --batch`, so listing hundreds of bugs is quick.
+- **Fast reads** -- bug data is read directly from git objects via pygit2
+  (libgit2 bindings). Listing uses the git-bug CLI cache when available
+  (~100ms for hundreds of bugs).
 - **Safe writes** -- all mutations go through the `git bug` CLI, which
   keeps Lamport clocks and the operation DAG consistent.
 - **Simple API** -- one main class (`GitBugRepo`) with plain Python
   dataclasses for bugs, comments, and identities.
-- **No dependencies** -- only the Python standard library and a working
-  `git` installation are needed at runtime.
 
 ## Quick example
 
@@ -37,8 +36,9 @@ repo.add_comment(bug.id, 'I can reproduce this on Firefox 130.')
 ## Requirements
 
 - Python 3.9 or later
-- `git` on your `$PATH`
-- `git-bug` v0.10+ on your `$PATH` (only needed for write operations)
+- pygit2 (libgit2 Python bindings)
+- `git-bug` v0.10+ on your `$PATH` (needed for write operations and
+  fast cached listing)
 
 ## Installation
 
@@ -66,9 +66,9 @@ pip install -e '.[dev]'
 python -m pytest
 ```
 
-The test suite includes both unit tests (with mocked git) and integration
-tests that exercise the real `git-bug` binary against ephemeral
-repositories.
+The test suite includes unit tests (using real git objects in temporary
+repos via pygit2) and integration tests that exercise the full stack
+including the `git-bug` binary.
 
 ## Contributing
 
