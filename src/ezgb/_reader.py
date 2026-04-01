@@ -8,10 +8,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
-from ezgb._git import git_lines, git_run
+import pygit2
+
 from ezgb._models import (
     OP_ADD_COMMENT,
     OP_CREATE,
@@ -68,137 +70,80 @@ class BugReader:
 
     def __init__(self, repo_path: str) -> None:
         self._repo = repo_path
+        gitdir = repo_path
+        if os.path.isdir(os.path.join(repo_path, '.git')):
+            gitdir = os.path.join(repo_path, '.git')
+        self._pygit: Any = pygit2.Repository(gitdir)
         self._bug_cache: dict[str, Bug] = {}
         self._summary_cache: dict[str, BugSummary] = {}
         self._identity_cache: dict[str, Identity] = {}
         self._resolve_cache: dict[str, str] = {}
 
-    # -- Log parsing ---------------------------------------------------------
-
-    @staticmethod
-    def _parse_log_raw(
-        output: str, target_file: str = 'ops',
-    ) -> list[tuple[str, str]]:
-        """Parse ``git log --raw --full-index --format=%H`` output.
-
-        Returns ``[(commit_hash, blob_hash)]`` for each commit whose
-        raw diff touches a file named *target_file*.
-        """
-        entries: list[tuple[str, str]] = []
-        current_commit: str | None = None
-        for line in output.splitlines():
-            line = line.rstrip()
-            if not line:
-                continue
-            # 64-hex-char line -> commit hash
-            if len(line) == 40 and all(c in '0123456789abcdef' for c in line):
-                current_commit = line
-                continue
-            # Raw diff: :old_mode new_mode old_hash new_hash status\tfilename
-            if line.startswith(':') and current_commit:
-                parts = line.split('\t', 1)
-                if len(parts) != 2:
-                    continue
-                filename = parts[1]
-                if filename != target_file:
-                    continue
-                diff_info = parts[0].split()
-                if len(diff_info) >= 4:
-                    new_blob = diff_info[3]
-                    entries.append((current_commit, new_blob))
-        return entries
-
-    # -- Blob reading --------------------------------------------------------
-
-    def _batch_cat_blobs(self, hashes: list[str]) -> dict[str, str]:
-        """Read multiple blobs in one ``git cat-file --batch`` call.
-
-        Returns ``{input_hash: content_string}``. Missing objects are
-        skipped.
-        """
-        if not hashes:
-            return {}
-        stdin = ('\n'.join(hashes) + '\n').encode()
-        ecode, raw = git_run(
-            self._repo, ['cat-file', '--batch'],
-            stdin=stdin, decode=False,
-        )
-        if ecode != 0:
-            return {}
-        data: bytes = raw if isinstance(raw, bytes) else raw.encode()
-        result: dict[str, str] = {}
-        pos = 0
-        hash_iter = iter(hashes)
-        while pos < len(data):
-            nl = data.find(b'\n', pos)
-            if nl < 0:
-                break
-            header = data[pos:nl].decode()
-            input_hash = next(hash_iter, None)
-            if input_hash is None:
-                break
-            if header.endswith(' missing'):
-                pos = nl + 1
-                continue
-            hdr_parts = header.split()
-            if len(hdr_parts) < 3:
-                pos = nl + 1
-                continue
-            try:
-                size = int(hdr_parts[2])
-            except ValueError:
-                pos = nl + 1
-                continue
-            content_start = nl + 1
-            content_end = content_start + size
-            if content_end > len(data):
-                break
-            result[input_hash] = data[content_start:content_end].decode()
-            pos = content_end + 1
-        return result
+    # -- Blob reading (pygit2) -------------------------------------------------
 
     def _cat_blob(self, blob_hash: str) -> str:
         """Read a single git blob as text."""
-        ecode, out = git_run(self._repo, ['cat-file', 'blob', blob_hash])
-        if ecode != 0 or not isinstance(out, str):
+        try:
+            obj = self._pygit.get(blob_hash)
+        except (ValueError, KeyError):
+            obj = None
+        if obj is None or obj.type != pygit2.GIT_OBJECT_BLOB:
             raise BugNotFoundError('failed to read blob %s' % blob_hash)
-        return out
+        result: str = obj.data.decode(errors='replace')
+        return result
 
     def cat_blob_bytes(self, blob_hash: str) -> bytes:
-        """Read a single git blob as raw bytes.
-
-        Useful for reading file attachments referenced by
-        :attr:`Comment.attachment_ids`.
-        """
-        ecode, out = git_run(
-            self._repo, ['cat-file', 'blob', blob_hash], decode=False,
-        )
-        if ecode != 0 or not isinstance(out, bytes):
+        """Read a single git blob as raw bytes."""
+        try:
+            obj = self._pygit.get(blob_hash)
+        except (ValueError, KeyError):
+            obj = None
+        if obj is None or obj.type != pygit2.GIT_OBJECT_BLOB:
             raise BugNotFoundError('failed to read blob %s' % blob_hash)
-        return out
+        return bytes(obj.data)
+
+    def _walk_ref_tree_blobs(
+        self, refname: str, target_file: str = 'ops',
+    ) -> list[tuple[str, str]]:
+        """Walk the commit chain for a ref and find named blobs.
+
+        Returns ``[(commit_hex, blob_hex)]`` oldest first, for each
+        commit whose tree contains *target_file*.
+        """
+        try:
+            ref = self._pygit.references.get(refname)
+        except (ValueError, KeyError):
+            ref = None
+        if ref is None:
+            return []
+        tip = ref.peel(pygit2.Commit)
+        entries: list[tuple[str, str]] = []
+        commit: pygit2.Commit | None = tip
+        while commit is not None:
+            tree = commit.tree
+            if target_file in tree:
+                blob_entry = tree[target_file]
+                entries.append((str(commit.id), str(blob_entry.id)))
+            commit = commit.parents[0] if commit.parents else None
+        entries.reverse()
+        return entries
 
     # -- Format version checking ---------------------------------------------
 
     @staticmethod
-    def _check_format_version(
-        output: str, prefix: str, supported: int,
+    def _check_format_version_tree(
+        tree: pygit2.Tree, prefix: str, supported: int,
     ) -> None:
-        """Validate the git-bug format version from git log --raw output.
+        """Validate the git-bug format version from a commit tree.
 
-        Scans for tree entries matching ``{prefix}{N}`` (e.g.
-        ``version-4``) and raises UnsupportedFormatError if the
-        version does not match.
+        Scans tree entries for names matching ``{prefix}{N}`` and
+        raises UnsupportedFormatError if the version does not match.
         """
-        for line in output.splitlines():
-            if not line.startswith(':'):
-                continue
-            parts = line.split('\t', 1)
-            if len(parts) != 2:
-                continue
-            filename = parts[1]
-            if filename.startswith(prefix):
+        for entry in tree:
+            name: str = entry.name or ''
+            if name.startswith(prefix):
                 try:
-                    version = int(filename[len(prefix):])
+                    version = int(name[len(prefix):])
                 except ValueError:
                     continue
                 if version != supported:
@@ -210,54 +155,37 @@ class BugReader:
 
     # -- Ref enumeration -----------------------------------------------------
 
+    def _list_refs(
+        self, prefix: str, *, since: int = 0,
+    ) -> list[tuple[str, str]]:
+        """Return ``[(entity_id, commit_hex)]`` for refs under *prefix*.
+
+        If *since* is positive, only refs whose tip commit is newer
+        than that unix timestamp are returned.
+        """
+        results: list[tuple[str, str]] = []
+        for refname in self._pygit.references:
+            if not refname.startswith(prefix):
+                continue
+            ref = self._pygit.references.get(refname)
+            if ref is None:
+                continue
+            commit = ref.peel(pygit2.Commit)
+            if since > 0 and commit.commit_time < since:
+                continue
+            eid = refname.rsplit('/', 1)[-1]
+            results.append((eid, str(commit.id)))
+        return results
+
     def list_bug_refs(
         self, *, since: int = 0,
     ) -> list[tuple[str, str]]:
-        """Return ``[(bug_id, commit_hash)]`` for all bugs.
-
-        If *since* is a positive unix timestamp, only refs whose
-        tip commit is newer than that timestamp are returned.
-        """
-        if since > 0:
-            fmt = '%(refname:short) %(objectname) %(committerdate:unix)'
-        else:
-            fmt = '%(refname:short) %(objectname)'
-        lines = git_lines(self._repo, [
-            'for-each-ref', '--format=%s' % fmt,
-            'refs/bugs/',
-        ])
-        results: list[tuple[str, str]] = []
-        for line in lines:
-            parts = line.split(None, 2)
-            if len(parts) < 2:
-                continue
-            refname, commit = parts[0], parts[1]
-            if since > 0 and len(parts) == 3:
-                try:
-                    ts = int(parts[2])
-                except ValueError:
-                    continue
-                if ts < since:
-                    continue
-            bid = refname.split('/')[-1]
-            results.append((bid, commit))
-        return results
+        """Return ``[(bug_id, commit_hash)]`` for all bugs."""
+        return self._list_refs('refs/bugs/', since=since)
 
     def list_identity_refs(self) -> list[tuple[str, str]]:
         """Return ``[(identity_id, commit_hash)]`` for all identities."""
-        lines = git_lines(self._repo, [
-            'for-each-ref', '--format=%(refname:short) %(objectname)',
-            'refs/identities/',
-        ])
-        results: list[tuple[str, str]] = []
-        for line in lines:
-            parts = line.split(None, 1)
-            if len(parts) != 2:
-                continue
-            refname, commit = parts
-            iid = refname.split('/')[-1]
-            results.append((iid, commit))
-        return results
+        return self._list_refs('refs/identities/')
 
     # -- Bug ID resolution ---------------------------------------------------
 
@@ -269,12 +197,11 @@ class BugReader:
         """
         if bid in self._resolve_cache:
             return self._resolve_cache[bid]
-        lines = git_lines(self._repo, [
-            'for-each-ref', '--format=%(refname)',
-            'refs/bugs/' + bid + '*',
-        ])
-        candidates = [
-            ln.strip().rsplit('/', 1)[-1] for ln in lines if ln.strip()
+        prefix = 'refs/bugs/' + bid
+        candidates: list[str] = [
+            str(refname).rsplit('/', 1)[-1]
+            for refname in self._pygit.references
+            if str(refname).startswith(prefix)
         ]
         if len(candidates) == 1:
             full_bid = candidates[0]
@@ -301,24 +228,20 @@ class BugReader:
         hashing.
         """
         bid = self.resolve_bug_id(bid)
-        ecode, output = git_run(self._repo, [
-            'log', '--raw', '--full-index', '--format=%H',
-            '--reverse', 'refs/bugs/' + bid,
-        ])
-        if ecode != 0 or not isinstance(output, str):
-            return [], []
-        self._check_format_version(output, 'version-', SUPPORTED_BUG_FORMAT)
-        entries = self._parse_log_raw(output)
+        refname = 'refs/bugs/' + bid
+        entries = self._walk_ref_tree_blobs(refname, 'ops')
         if not entries:
             return [], []
-        blob_hashes = [h for _, h in entries]
-        blobs = self._batch_cat_blobs(blob_hashes)
+        # Check format version from the first commit's tree
+        ref = self._pygit.references.get(refname)
+        if ref is not None:
+            tip = ref.peel(pygit2.Commit)
+            self._check_format_version_tree(
+                tip.tree, 'version-', SUPPORTED_BUG_FORMAT)
         packs: list[dict[str, Any]] = []
         raw_blobs: list[str] = []
         for _commit, blob_hash in entries:
-            raw = blobs.get(blob_hash)
-            if raw is None:
-                continue
+            raw = self._cat_blob(blob_hash)
             try:
                 pack: dict[str, Any] = json.loads(raw)
             except json.JSONDecodeError:
@@ -342,35 +265,30 @@ class BugReader:
         if identity_id in self._identity_cache:
             return self._identity_cache[identity_id]
 
-        # Get the latest commit's version blob
-        ecode, output = git_run(self._repo, [
-            'log', '--raw', '--full-index', '--format=%H',
-            '-1', 'refs/identities/' + identity_id,
-        ])
-        if ecode != 0 or not isinstance(output, str) or not output.strip():
-            fallback = Identity(
-                id=identity_id, name=identity_id, email=identity_id,
-            )
-            self._identity_cache[identity_id] = fallback
-            return fallback
-
-        # Identity commits store a blob named 'version' (not 'ops')
-        entries = self._parse_log_raw(output, target_file='version')
-        if not entries:
-            fallback = Identity(
-                id=identity_id, name=identity_id, email=identity_id,
-            )
-            self._identity_cache[identity_id] = fallback
-            return fallback
-
-        _commit, version_hash = entries[0]
-        raw = self._cat_blob(version_hash)
+        fallback = Identity(
+            id=identity_id, name=identity_id, email=identity_id,
+        )
+        refname = 'refs/identities/' + identity_id
         try:
+            ref = self._pygit.references.get(refname)
+        except (ValueError, KeyError):
+            ref = None
+        if ref is None:
+            self._identity_cache[identity_id] = fallback
+            return fallback
+
+        # Get the tip commit's tree and look for 'version' blob
+        tip = ref.peel(pygit2.Commit)
+        if 'version' not in tip.tree:
+            self._identity_cache[identity_id] = fallback
+            return fallback
+
+        version_blob = tip.tree['version']
+        try:
+            raw = self._pygit[version_blob.id].data.decode(
+                errors='replace')
             data: dict[str, Any] = json.loads(raw)
-        except json.JSONDecodeError:
-            fallback = Identity(
-                id=identity_id, name=identity_id, email=identity_id,
-            )
+        except (json.JSONDecodeError, KeyError):
             self._identity_cache[identity_id] = fallback
             return fallback
 
@@ -685,54 +603,18 @@ class BugReader:
         return summary
 
     def prefetch_bugs(self, bids: list[str]) -> None:
-        """Warm the cache for multiple bugs using batched blob reads.
+        """Warm the cache by building bugs for the given IDs.
 
-        Collects ops blob hashes for all uncached bugs, then reads
-        them all in a single ``git cat-file --batch`` call.
+        With pygit2, blob reads are already fast in-process calls,
+        so this simply builds each bug and caches the result.
         """
-        bug_entries: dict[str, list[tuple[str, str]]] = {}
-        all_hashes: list[str] = []
         for bid in bids:
             if bid in self._bug_cache:
                 continue
-            ecode, output = git_run(self._repo, [
-                'log', '--raw', '--full-index', '--format=%H',
-                '--reverse', 'refs/bugs/' + bid,
-            ])
-            if ecode != 0 or not isinstance(output, str):
+            try:
+                self.build_bug(bid)
+            except BugNotFoundError:
                 continue
-            entries = self._parse_log_raw(output)
-            if entries:
-                bug_entries[bid] = entries
-                all_hashes.extend(h for _, h in entries)
-
-        if not all_hashes:
-            return
-
-        blobs = self._batch_cat_blobs(all_hashes)
-
-        for bid, entries in bug_entries.items():
-            packs: list[dict[str, Any]] = []
-            raw_blobs: list[str] = []
-            for _commit, blob_hash in entries:
-                raw = blobs.get(blob_hash)
-                if raw is None:
-                    continue
-                try:
-                    pack: dict[str, Any] = json.loads(raw)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        'failed to parse ops blob %s for bug %s',
-                        blob_hash, bid,
-                    )
-                    continue
-                packs.append(pack)
-                raw_blobs.append(raw)
-            if packs:
-                try:
-                    self.build_bug(bid, packs=packs, raw_blobs=raw_blobs)
-                except BugNotFoundError:
-                    continue
 
     # -- Cache management ----------------------------------------------------
 
