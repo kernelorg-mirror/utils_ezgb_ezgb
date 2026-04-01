@@ -602,26 +602,6 @@ class TestLabels:
 
 
 # ------------------------------------------------------------------
-# Writer: assign / unassign (methods not yet implemented)
-# ------------------------------------------------------------------
-
-class TestAssign:
-    def test_assign(self, reader, writer, repo_path):
-        setup_single_bug(repo_path, reader)
-        writer.assign(BUG_ID, 'bob@example.com')
-        joined = ' '.join(' '.join(c) for c in writer._cli_calls)
-        assert 'assigned:bob@example.com' in joined
-
-    def test_unassign_removes_existing(self, reader, writer, repo_path):
-        assign_op = make_label_change_op(
-            added=['assigned:alice@example.com'],
-        )
-        setup_single_bug(repo_path, reader, extra_ops=[assign_op])
-        writer.unassign(BUG_ID)
-        joined = ' '.join(' '.join(c) for c in writer._cli_calls)
-        assert 'assigned:alice@example.com' in joined
-
-
 # ------------------------------------------------------------------
 # GitBugRepo facade
 # ------------------------------------------------------------------

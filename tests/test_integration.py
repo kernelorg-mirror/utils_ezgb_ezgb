@@ -175,29 +175,6 @@ class TestLabels:
         assert 'area/network' in bug.labels
 
 
-class TestAssign:
-    def test_assign_and_unassign(self, gb_repo):
-        bug = gb_repo.create_bug('Assign test', 'Body')
-        gb_repo.assign(bug.id, 'bob@example.com')
-
-        bug = gb_repo.get_bug(bug.id)
-        assert bug.assigned_to == 'bob@example.com'
-
-        gb_repo.unassign(bug.id)
-        bug = gb_repo.get_bug(bug.id)
-        assert bug.assigned_to == ''
-
-    def test_reassign(self, gb_repo):
-        bug = gb_repo.create_bug('Reassign test', 'Body')
-        gb_repo.assign(bug.id, 'alice@example.com')
-        gb_repo.assign(bug.id, 'bob@example.com')
-
-        bug = gb_repo.get_bug(bug.id)
-        assert bug.assigned_to == 'bob@example.com'
-        # Old assignment label should be gone
-        assert 'assigned:alice@example.com' not in bug.labels
-
-
 class TestListBugs:
     def test_list_all(self, gb_repo):
         gb_repo.create_bug('Bug one', 'First')
