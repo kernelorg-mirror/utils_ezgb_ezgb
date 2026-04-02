@@ -35,9 +35,10 @@ class BugWriter:
         self._repo = repo_path
         self._reader = reader
 
-    def _cli(self, args: list[str]) -> tuple[int, str, str]:
+    def _cli(self, args: list[str],
+             stdin: str | None = None) -> tuple[int, str, str]:
         """Run a git-bug CLI command."""
-        return git_bug_cli(self._repo, args)
+        return git_bug_cli(self._repo, args, stdin=stdin)
 
     def create_bug(self, title: str, body: str) -> Bug:
         """Create a new bug and return its snapshot.
@@ -45,8 +46,12 @@ class BugWriter:
         Parses the human_id from ``git bug new`` output, then
         resolves and builds the full Bug.
         """
-        args = ['bug', 'new', '-t', title, '-m', body, '--non-interactive']
-        ecode, out, err = self._cli(args)
+        # Use -F - to pipe the message via stdin, avoiding OS argument
+        # size limits for large bodies.  The format is the same as git
+        # commit: first line = title, blank line, rest = body.
+        message = f'{title}\n\n{body}' if body else title
+        args = ['bug', 'new', '-F', '-', '--non-interactive']
+        ecode, out, err = self._cli(args, stdin=message)
         if ecode != 0:
             raise CliError('git bug new failed: %s' % err)
 
@@ -67,9 +72,9 @@ class BugWriter:
         bid = self._reader.resolve_bug_id(bid)
         args = [
             'bug', 'comment', 'new', bid,
-            '-m', text, '--non-interactive',
+            '-F', '-', '--non-interactive',
         ]
-        ecode, out, err = self._cli(args)
+        ecode, out, err = self._cli(args, stdin=text)
         if ecode != 0:
             raise CliError('git bug comment new failed: %s' % err)
         self._reader.invalidate(bid)
@@ -85,9 +90,9 @@ class BugWriter:
         bid = self._reader.resolve_bug_id(bid)
         args = [
             'bug', 'comment', 'edit', comment_id,
-            '-m', text, '--non-interactive',
+            '-F', '-', '--non-interactive',
         ]
-        ecode, out, err = self._cli(args)
+        ecode, out, err = self._cli(args, stdin=text)
         if ecode != 0:
             raise CliError('git bug comment edit failed: %s' % err)
         self._reader.invalidate(bid)

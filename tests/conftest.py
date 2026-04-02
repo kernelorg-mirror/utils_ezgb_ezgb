@@ -216,7 +216,7 @@ def writer(reader, repo_path):
     cli_routes = {}
     cli_calls = []
 
-    def _cli_side_effect(rp, args):
+    def _cli_side_effect(rp, args, stdin=None):
         cli_calls.append(args)
         joined = ' '.join(args)
         for key, value in cli_routes.items():

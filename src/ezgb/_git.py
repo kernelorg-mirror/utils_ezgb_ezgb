@@ -52,11 +52,14 @@ def git_lines(repo_path: str, args: list[str]) -> list[str]:
 
 def git_bug_cli(
     repo_path: str, args: list[str],
+    stdin: str | None = None,
 ) -> tuple[int, str, str]:
     """Run ``git -C REPO bug <args>`` for write operations.
 
     Uses ``-C`` (not ``--git-dir``) because the git-bug CLI
     needs a working tree context.
+
+    When *stdin* is provided it is piped to the process on stdin.
 
     Returns ``(returncode, stdout, stderr)``.
     """
@@ -67,5 +70,6 @@ def git_bug_cli(
         stdin=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    out, err = sp.communicate()
+    in_bytes = stdin.encode() if stdin is not None else None
+    out, err = sp.communicate(input=in_bytes)
     return sp.returncode, out.decode(errors='replace'), err.decode(errors='replace')
