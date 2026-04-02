@@ -607,6 +607,7 @@ function M.build_bug_summary(bid)
     local is_open = true
     local creator_id = ""
     local created_at = 0
+    local edited_at = 0
     local labels = {}
     local comment_count = 0
 
@@ -620,11 +621,15 @@ function M.build_bug_summary(bid)
 
         for _, op in ipairs(ops) do
             local op_type = jval(op.type, 0)
+            local ts = jval(op.timestamp, 0)
+            if ts > edited_at then
+                edited_at = ts
+            end
 
             if op_type == M.OP_CREATE then
                 title = jval(op.title, "")
                 creator_id = author_id
-                created_at = jval(op.timestamp, 0)
+                created_at = ts
                 if jval(op.message, "") ~= "" then
                     comment_count = comment_count + 1
                 end
@@ -656,6 +661,7 @@ function M.build_bug_summary(bid)
         status        = is_open and M.STATUS_OPEN or M.STATUS_CLOSED,
         creator_id    = creator_id,
         created_at    = created_at,
+        edited_at     = edited_at,
         labels        = labels,
         comment_count = comment_count,
     }
