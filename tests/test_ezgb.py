@@ -7,6 +7,7 @@ Uses real git objects in temporary bare repos (via pygit2) instead
 of subprocess mocking. See conftest.py for fixtures and helpers.
 """
 import json
+from datetime import datetime, timezone
 
 import pygit2
 import pytest
@@ -330,6 +331,26 @@ class TestBuildBugSummary:
         assert s.status == Status.OPEN
         assert s.creator_id == IDENTITY_ID
         assert s.comment_count == 1  # create op has a message
+
+    def test_author_name_resolved(self, reader, repo_path):
+        # The native path must resolve the creator's display name so
+        # list views match summaries from the git-bug CLI cache.
+        setup_single_bug(repo_path, reader)
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.author_name == 'Alice'
+
+    def test_edited_at_tracks_latest_op(self, reader, repo_path):
+        comment_op = make_comment_op('A follow-up', timestamp=1700009000)
+        setup_single_bug(repo_path, reader, extra_ops=[comment_op])
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.edited_at == datetime.fromtimestamp(
+            1700009000, tz=timezone.utc)
+        assert s.edited_at > s.created_at
+
+    def test_edited_at_defaults_to_created(self, reader, repo_path):
+        setup_single_bug(repo_path, reader)
+        s = reader.build_bug_summary(BUG_ID)
+        assert s.edited_at == s.created_at
 
     def test_set_title(self, reader, repo_path):
         title_op = make_set_title_op('Updated title')

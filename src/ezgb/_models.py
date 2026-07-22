@@ -113,9 +113,10 @@ class BugSummary:
     Identity resolution is deferred -- *creator_id* holds the raw
     identity hash string rather than a resolved Identity object.
 
-    When populated from the git-bug CLI cache, *author_name* and
-    *edited_at* are available. When built from native git objects,
-    these may be empty/epoch if identity resolution was skipped.
+    Both the git-bug CLI cache and native git-object reads populate
+    *author_name* (the creator's resolved display name) and
+    *edited_at* (the last-activity time). *author_name* may fall back
+    to the raw identity hash if the identity cannot be resolved.
     """
     id: str
     title: str

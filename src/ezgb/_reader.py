@@ -556,11 +556,15 @@ class BugReader:
         created_at: datetime | None = None
         labels: set[str] = set()
         comment_count = 0
+        latest_ts = 0
 
         for pack in packs:
             author_id = pack.get('author', {}).get('id', '')
             for op in pack.get('ops', []):
                 op_type = op.get('type', 0)
+                ts = op.get('timestamp', 0)
+                if isinstance(ts, int) and ts > latest_ts:
+                    latest_ts = ts
 
                 if op_type == OP_CREATE:
                     title = op.get('title', '')
@@ -590,6 +594,20 @@ class BugReader:
         if created_at is None:
             created_at = datetime.fromtimestamp(0, tz=timezone.utc)
 
+        # Resolve the creator's display name and derive the last-activity
+        # time so native summaries carry the same fields as those built
+        # from the git-bug CLI cache. Without this, list views that read
+        # author_name/edited_at (e.g. right after a pull invalidates the
+        # CLI cache) show blank submitters and mis-sort by an epoch date.
+        # resolve_identity is cached and cheap with pygit2, and only the
+        # creator (one per bug) is resolved -- per-op identity resolution
+        # stays deferred to build_bug().
+        author_name = ''
+        if creator_id:
+            author_name = self.resolve_identity(creator_id).name
+        edited_at = (self._format_timestamp(latest_ts)
+                     if latest_ts else created_at)
+
         summary = BugSummary(
             id=bid,
             title=title,
@@ -598,6 +616,8 @@ class BugReader:
             created_at=created_at,
             labels=frozenset(labels),
             comment_count=comment_count,
+            author_name=author_name,
+            edited_at=edited_at,
         )
         self._summary_cache[bid] = summary
         return summary
