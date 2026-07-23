@@ -28,11 +28,16 @@ Clone the repository and install in editable mode:
    cd ezgb
    pip install -e .
 
-To also install the development tools (pytest, mypy, ruff):
+To also install the development tools (pytest, mypy, ruff, pyright, and
+ty), which live in a PEP 735 ``[dependency-groups]`` table:
 
 .. code-block:: bash
 
-   pip install -e '.[dev]'
+   # with uv (installs the project and the dev tools)
+   uv sync
+
+   # or with pip 25.1 or later
+   pip install -e . --group dev
 
 Verify
 ^^^^^^
@@ -82,7 +87,7 @@ This installs ``ezgb.lua`` to the standard Lua module path (typically
 Verify
 ^^^^^^
 
-.. code-block:: lua
+.. code-block:: console
 
    $ lua -e 'local ezgb = require("ezgb"); print("ok")'
    ok

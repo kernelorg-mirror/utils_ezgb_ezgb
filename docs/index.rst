@@ -40,7 +40,7 @@ Key features
 ------------
 
 - **Fast reads** -- bug data is read directly from git objects (via
-  subprocess in Python, via luagit2 in Lua), so listing hundreds of
+  pygit2 in Python, via luagit2 in Lua), so listing hundreds of
   bugs is quick.
 - **Safe writes** (Python only) -- all mutations go through the
   ``git bug`` CLI, which keeps Lamport clocks and the operation DAG
@@ -57,3 +57,4 @@ Key features
    quickstart
    api
    architecture
+   releases

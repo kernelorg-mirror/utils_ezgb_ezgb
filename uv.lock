@@ -284,7 +284,7 @@ wheels = [
 
 [[package]]
 name = "ezgb"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "pygit2", version = "1.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },

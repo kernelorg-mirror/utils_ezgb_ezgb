@@ -136,15 +136,16 @@ operation.
 Caching
 -------
 
-Three in-memory caches are maintained:
+Four in-memory caches are maintained:
 
 - **Bug cache** -- maps full bug ID to a ``Bug`` object.
+- **Summary cache** -- maps full bug ID to a ``BugSummary`` object.
 - **Identity cache** -- maps identity ID to an ``Identity`` object.
 - **Resolve cache** -- maps bug ID prefixes (and full IDs) to full IDs.
 
 Call :meth:`~ezgb.GitBugRepo.invalidate` to clear them. Passing a
-specific bug ID only evicts that bug from the bug cache. Passing no
-argument clears all three caches.
+specific bug ID only evicts that bug from the bug and summary caches.
+Passing no argument clears all four caches.
 
 Write operations automatically invalidate the affected bug, so you
 normally do not need to call ``invalidate()`` yourself. The main use
