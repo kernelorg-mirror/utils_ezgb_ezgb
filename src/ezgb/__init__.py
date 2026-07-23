@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2024 by the Linux Foundation
 """ezgb: a standalone Python library for git-bug repositories."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -76,6 +77,7 @@ class GitBugRepo:
             return int(since.timestamp())
         # str -- delegate to the reader's parser
         from ezgb._reader import BugReader
+
         return BugReader._parse_since(since)
 
     def list_bugs(
@@ -93,9 +95,13 @@ class GitBugRepo:
         ``YYYYMMDDHHMMSS`` format.  Only bugs whose tip commit is
         newer than this value are returned.
         """
-        return list(self.iter_bugs(
-            status=status, label=label, since=since,
-        ))
+        return list(
+            self.iter_bugs(
+                status=status,
+                label=label,
+                since=since,
+            )
+        )
 
     def iter_bugs(
         self,
@@ -142,16 +148,18 @@ class GitBugRepo:
             if cached is not None:
                 results = cached
                 if status is not None:
-                    results = [s for s in results
-                               if s.status == status]
+                    results = [s for s in results if s.status == status]
                 if label is not None:
-                    results = [s for s in results
-                               if label in s.labels]
+                    results = [s for s in results if label in s.labels]
                 return results
         # Slow path: native git object reads
-        return list(self.iter_bug_summaries(
-            status=status, label=label, since=since,
-        ))
+        return list(
+            self.iter_bug_summaries(
+                status=status,
+                label=label,
+                since=since,
+            )
+        )
 
     def _list_summaries_from_cli(self) -> list[BugSummary] | None:
         """Try to list summaries via the git-bug CLI cache.
@@ -166,8 +174,8 @@ class GitBugRepo:
             return None
 
         from ezgb._git import git_bug_cli
-        ecode, out, _err = git_bug_cli(
-            self._repo, ['bug', '-f', 'json'])
+
+        ecode, out, _err = git_bug_cli(self._repo, ['bug', '-f', 'json'])
         if ecode != 0 or not out.strip():
             return None
         try:
@@ -180,19 +188,20 @@ class GitBugRepo:
             if not bid:
                 continue
             status_str = str(raw.get('status', 'open'))
-            bug_status = (Status.CLOSED if status_str == 'closed'
-                          else Status.OPEN)
+            bug_status = Status.CLOSED if status_str == 'closed' else Status.OPEN
             create_time = raw.get('create_time') or {}
             edit_time = raw.get('edit_time') or {}
-            ct = (create_time.get('timestamp', 0)
-                  if isinstance(create_time, dict) else 0)
-            et = (edit_time.get('timestamp', 0)
-                  if isinstance(edit_time, dict) else 0)
+            ct = create_time.get('timestamp', 0) if isinstance(create_time, dict) else 0
+            if not isinstance(ct, int):
+                ct = 0
+            et = edit_time.get('timestamp', 0) if isinstance(edit_time, dict) else 0
+            if not isinstance(et, int):
+                et = 0
             author = raw.get('author') or {}
-            author_name = (author.get('name', '')
-                           if isinstance(author, dict) else '')
-            author_id = (author.get('id', '')
-                         if isinstance(author, dict) else '')
+            author_name = author.get('name', '') if isinstance(author, dict) else ''
+            if not isinstance(author_name, str):
+                author_name = ''
+            author_id = author.get('id', '') if isinstance(author, dict) else ''
             raw_labels = raw.get('labels') or []
             if isinstance(raw_labels, list):
                 labels = frozenset(str(lb) for lb in raw_labels)
@@ -201,19 +210,19 @@ class GitBugRepo:
             comment_count = raw.get('comments', 0)
             if not isinstance(comment_count, int):
                 comment_count = 0
-            results.append(BugSummary(
-                id=bid,
-                title=str(raw.get('title', '')),
-                status=bug_status,
-                creator_id=str(author_id),
-                created_at=datetime.fromtimestamp(
-                    int(ct), tz=timezone.utc),
-                labels=labels,
-                comment_count=comment_count,
-                author_name=author_name,
-                edited_at=datetime.fromtimestamp(
-                    int(et), tz=timezone.utc),
-            ))
+            results.append(
+                BugSummary(
+                    id=bid,
+                    title=str(raw.get('title', '')),
+                    status=bug_status,
+                    creator_id=str(author_id),
+                    created_at=datetime.fromtimestamp(int(ct), tz=timezone.utc),
+                    labels=labels,
+                    comment_count=comment_count,
+                    author_name=author_name,
+                    edited_at=datetime.fromtimestamp(int(et), tz=timezone.utc),
+                )
+            )
         return results
 
     def iter_bug_summaries(
@@ -261,6 +270,7 @@ class GitBugRepo:
         import json
 
         from ezgb._git import git_bug_cli
+
         ecode, out, _err = git_bug_cli(self._repo, ['bug', '-f', 'json', query])
         if ecode != 0:
             return []

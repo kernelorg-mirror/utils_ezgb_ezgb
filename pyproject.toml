@@ -26,8 +26,10 @@ classifiers = [
 [dependency-groups]
 dev = [
     "mypy",
+    "pyright",
     "pytest",
     "ruff",
+    "ty",
 ]
 
 [project.urls]
@@ -41,11 +43,33 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
-asyncio_mode = "strict"
-asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 strict = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.pyright]
+# pyright automatically ignores virtual environments and other directories,
+# but once we specify `exclude`, we're on our own. ".venv-*" catches the
+# per-interpreter venvs that ci-matrix.sh leaves behind (without them,
+# pyright tries to type-check every package in each one).
+exclude = [".venv", ".venv-*"]
+typeCheckingMode = "strict"
+
+# pygit2 ships no type information, so member/variable/argument types coming
+# out of it resolve to Unknown. Relax the strict "unknown type" reports
+# rather than sprinkling casts across every git-object access site.
+reportUnknownArgumentType = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+
+# False positives caused by underscore-prefixed helpers used across modules.
+reportPrivateUsage = false
+
+[tool.ty.rules]
+all = "error"

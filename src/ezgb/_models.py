@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2024 by the Linux Foundation
 """Data models, enums, exceptions, and constants for ezgb."""
+
 from __future__ import annotations
 
 import enum
@@ -12,6 +13,7 @@ from datetime import datetime, timezone
 _EPOCH_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 # -- Exceptions --------------------------------------------------------------
+
 
 class EzgbError(Exception):
     """Base exception for all ezgb errors."""
@@ -43,8 +45,10 @@ class CliError(EzgbError):
 
 # -- Enums -------------------------------------------------------------------
 
+
 class Status(enum.Enum):
     """Bug status matching git-bug's common.Status values."""
+
     OPEN = 1
     CLOSED = 2
 
@@ -72,9 +76,11 @@ STATUS_CLOSED: int = 2
 
 # -- Dataclasses -------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Identity:
     """A git-bug user identity."""
+
     id: str
     name: str
     email: str
@@ -84,6 +90,7 @@ class Identity:
 @dataclass
 class Comment:
     """A comment on a bug."""
+
     id: str
     author: Identity
     text: str
@@ -95,6 +102,7 @@ class Comment:
 @dataclass
 class Bug:
     """A git-bug bug snapshot reconstructed from operations."""
+
     id: str
     title: str
     status: Status
@@ -118,6 +126,7 @@ class BugSummary:
     *edited_at* (the last-activity time). *author_name* may fall back
     to the raw identity hash if the identity cannot be resolved.
     """
+
     id: str
     title: str
     status: Status

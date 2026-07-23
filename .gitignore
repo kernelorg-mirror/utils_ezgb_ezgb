@@ -8,7 +8,11 @@ build/
 
 # Virtual environments
 .venv/
+.venv-*/
 venv/
+
+# ty type-checker cache
+.ty_cache/
 
 # Testing
 .pytest_cache/

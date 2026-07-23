@@ -4,9 +4,15 @@ These tests create ephemeral git repositories, initialize git-bug
 with a test identity, and exercise the full ezgb stack end-to-end.
 Skip automatically when ``git-bug`` is not installed.
 """
+
+from __future__ import annotations
+
 import json
 import shutil
 import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,41 +25,57 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture()
-def gb_repo(tmp_path):
+def gb_repo(tmp_path: Path) -> Iterator[GitBugRepo]:
     """Spin up a temporary git repo with git-bug and a test identity."""
     repo_dir = tmp_path / 'repo'
     repo_dir.mkdir()
     repo_path = str(repo_dir)
 
-    def _run(args, **kwargs):
+    def _run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            args, capture_output=True, text=True, check=True, **kwargs,
+            args,
+            capture_output=True,
+            text=True,
+            check=True,
+            **kwargs,
         )
 
     # Initialise the git repo
     _run(['git', 'init', repo_path])
     _run(['git', '-C', repo_path, 'config', 'user.name', 'Test User'])
-    _run(['git', '-C', repo_path, 'config', 'user.email',
-          'test@example.com'])
+    _run(['git', '-C', repo_path, 'config', 'user.email', 'test@example.com'])
     _run(['git', '-C', repo_path, 'commit', '--allow-empty', '-m', 'init'])
 
     # Create and adopt a git-bug identity
-    _run(['git', '-C', repo_path, 'bug', 'user', 'new',
-          '-n', 'Test User', '-e', 'test@example.com',
-          '--non-interactive'])
+    _run(
+        [
+            'git',
+            '-C',
+            repo_path,
+            'bug',
+            'user',
+            'new',
+            '-n',
+            'Test User',
+            '-e',
+            'test@example.com',
+            '--non-interactive',
+        ]
+    )
     result = _run(['git', '-C', repo_path, 'bug', 'user', '-f', 'json'])
     users = json.loads(result.stdout)
     _run(['git', '-C', repo_path, 'bug', 'user', 'adopt', users[0]['id']])
 
-    return GitBugRepo(repo_path)
+    yield GitBugRepo(repo_path)
 
 
 # ------------------------------------------------------------------
 # Tests
 # ------------------------------------------------------------------
 
+
 class TestCreateAndRead:
-    def test_round_trip(self, gb_repo):
+    def test_round_trip(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Test bug', 'Description text')
         assert bug.title == 'Test bug'
         assert bug.status == Status.OPEN
@@ -69,7 +91,7 @@ class TestCreateAndRead:
         assert bug2.id == bug.id
         assert bug2.title == 'Test bug'
 
-    def test_resolve_by_prefix(self, gb_repo):
+    def test_resolve_by_prefix(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Prefix test', 'Body')
         prefix = bug.id[:8]
         full_id = gb_repo.resolve_bug_id(prefix)
@@ -77,7 +99,7 @@ class TestCreateAndRead:
 
 
 class TestComments:
-    def test_add_comment(self, gb_repo):
+    def test_add_comment(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Comment test', 'Original body')
         comment = gb_repo.add_comment(bug.id, 'Follow-up')
         assert comment.text == 'Follow-up'
@@ -88,7 +110,7 @@ class TestComments:
         assert bug.comments[0].text == 'Original body'
         assert bug.comments[1].text == 'Follow-up'
 
-    def test_multiple_comments_ordering(self, gb_repo):
+    def test_multiple_comments_ordering(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Ordering test', 'c0')
         gb_repo.add_comment(bug.id, 'c1')
         gb_repo.add_comment(bug.id, 'c2')
@@ -102,7 +124,7 @@ class TestComments:
 
 
 class TestEditComment:
-    def test_edit_comment_text(self, gb_repo):
+    def test_edit_comment_text(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Edit comment test', 'Original body')
         comment = gb_repo.add_comment(bug.id, 'Original follow-up')
 
@@ -111,7 +133,7 @@ class TestEditComment:
         assert len(bug.comments) == 2
         assert bug.comments[1].text == 'Edited follow-up'
 
-    def test_edit_preserves_other_comments(self, gb_repo):
+    def test_edit_preserves_other_comments(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Preserve test', 'c0')
         c1 = gb_repo.add_comment(bug.id, 'c1')
         gb_repo.add_comment(bug.id, 'c2')
@@ -121,7 +143,7 @@ class TestEditComment:
         texts = [c.text for c in bug.comments]
         assert texts == ['c0', 'c1-edited', 'c2']
 
-    def test_edit_to_tombstone(self, gb_repo):
+    def test_edit_to_tombstone(self, gb_repo: GitBugRepo) -> None:
         """Simulate the b4 bugs comment removal flow."""
         bug = gb_repo.create_bug('Tombstone test', 'Body')
         comment = gb_repo.add_comment(bug.id, 'Sensitive content')
@@ -137,7 +159,7 @@ class TestEditComment:
 
 
 class TestStatus:
-    def test_close_and_reopen(self, gb_repo):
+    def test_close_and_reopen(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Status test', 'Body')
         assert gb_repo.get_bug(bug.id).status == Status.OPEN
 
@@ -151,7 +173,7 @@ class TestStatus:
 
 
 class TestTitle:
-    def test_edit_title(self, gb_repo):
+    def test_edit_title(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Original title', 'Body')
         gb_repo.set_title(bug.id, 'Updated title')
 
@@ -160,7 +182,7 @@ class TestTitle:
 
 
 class TestLabels:
-    def test_add_and_remove(self, gb_repo):
+    def test_add_and_remove(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Label test', 'Body')
         gb_repo.add_label(bug.id, 'priority/high')
         gb_repo.add_label(bug.id, 'area/network')
@@ -176,7 +198,7 @@ class TestLabels:
 
 
 class TestListBugs:
-    def test_list_all(self, gb_repo):
+    def test_list_all(self, gb_repo: GitBugRepo) -> None:
         gb_repo.create_bug('Bug one', 'First')
         gb_repo.create_bug('Bug two', 'Second')
 
@@ -185,7 +207,7 @@ class TestListBugs:
         titles = {b.title for b in bugs}
         assert titles == {'Bug one', 'Bug two'}
 
-    def test_filter_by_status(self, gb_repo):
+    def test_filter_by_status(self, gb_repo: GitBugRepo) -> None:
         gb_repo.create_bug('Open bug', 'Body')
         closed = gb_repo.create_bug('Closed bug', 'Body')
         gb_repo.set_status(closed.id, Status.CLOSED)
@@ -199,7 +221,7 @@ class TestListBugs:
         assert len(closed_bugs) == 1
         assert closed_bugs[0].title == 'Closed bug'
 
-    def test_filter_by_label(self, gb_repo):
+    def test_filter_by_label(self, gb_repo: GitBugRepo) -> None:
         labeled = gb_repo.create_bug('Labeled', 'Body')
         gb_repo.create_bug('Unlabeled', 'Body')
         gb_repo.add_label(labeled.id, 'important')
@@ -211,7 +233,7 @@ class TestListBugs:
 
 
 class TestIdentities:
-    def test_list_identities(self, gb_repo):
+    def test_list_identities(self, gb_repo: GitBugRepo) -> None:
         identities = gb_repo.list_identities()
         assert len(identities) >= 1
         names = [i.name for i in identities]
@@ -221,7 +243,7 @@ class TestIdentities:
 
 
 class TestIterBugs:
-    def test_yields_same_as_list(self, gb_repo):
+    def test_yields_same_as_list(self, gb_repo: GitBugRepo) -> None:
         gb_repo.create_bug('Bug A', 'Body A')
         gb_repo.create_bug('Bug B', 'Body B')
 
@@ -233,7 +255,7 @@ class TestIterBugs:
         assert len(listed) == len(iterated) == 2
         assert {b.title for b in listed} == {b.title for b in iterated}
 
-    def test_iter_with_filter(self, gb_repo):
+    def test_iter_with_filter(self, gb_repo: GitBugRepo) -> None:
         gb_repo.create_bug('Open one', 'Body')
         closed = gb_repo.create_bug('Closed one', 'Body')
         gb_repo.set_status(closed.id, Status.CLOSED)
@@ -245,7 +267,7 @@ class TestIterBugs:
 
 
 class TestSinceFilter:
-    def test_list_bugs_since(self, gb_repo):
+    def test_list_bugs_since(self, gb_repo: GitBugRepo) -> None:
         """Bugs created before 'since' are excluded."""
         bug = gb_repo.create_bug('Recent bug', 'Body')
         # Use a timestamp far in the past -- should include the bug
@@ -257,7 +279,7 @@ class TestSinceFilter:
         bugs = gb_repo.list_bugs(since=9999999999)
         assert len(bugs) == 0
 
-    def test_since_with_iso_string(self, gb_repo):
+    def test_since_with_iso_string(self, gb_repo: GitBugRepo) -> None:
         gb_repo.create_bug('String since', 'Body')
         gb_repo.invalidate()
         bugs = gb_repo.list_bugs(since='2020-01-01 00:00:00')
@@ -265,7 +287,7 @@ class TestSinceFilter:
 
 
 class TestAttachments:
-    def test_get_attachment_round_trip(self, gb_repo):
+    def test_get_attachment_round_trip(self, gb_repo: GitBugRepo) -> None:
         """Create a bug with an attachment, then read it back."""
         # Create a bug -- its description becomes comment 0
         bug = gb_repo.create_bug('Attachment test', 'See attached')
@@ -276,11 +298,13 @@ class TestAttachments:
         # blob. Use the ops blob itself as a stand-in.
         # Instead, test against an actual blob by writing one via git.
         import subprocess
+
         repo_path = gb_repo._repo
         result = subprocess.run(
             ['git', '-C', repo_path, 'hash-object', '-w', '--stdin'],
             input=b'test file content',
-            capture_output=True, check=True,
+            capture_output=True,
+            check=True,
         )
         blob_hash = result.stdout.decode().strip()
 
@@ -289,7 +313,7 @@ class TestAttachments:
 
 
 class TestCache:
-    def test_invalidate_and_reread(self, gb_repo):
+    def test_invalidate_and_reread(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Cache test', 'Body')
         bug1 = gb_repo.get_bug(bug.id)
         gb_repo.invalidate(bug.id)
@@ -298,7 +322,7 @@ class TestCache:
         assert bug1.title == bug2.title
         assert bug1.id == bug2.id
 
-    def test_full_invalidate(self, gb_repo):
+    def test_full_invalidate(self, gb_repo: GitBugRepo) -> None:
         bug = gb_repo.create_bug('Full invalidate', 'Body')
         gb_repo.get_bug(bug.id)
         gb_repo.invalidate()

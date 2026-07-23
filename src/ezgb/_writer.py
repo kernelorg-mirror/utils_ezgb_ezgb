@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2024 by the Linux Foundation
 """CLI wrappers for git-bug write operations."""
+
 from __future__ import annotations
 
 import logging
@@ -35,8 +36,7 @@ class BugWriter:
         self._repo = repo_path
         self._reader = reader
 
-    def _cli(self, args: list[str],
-             stdin: str | None = None) -> tuple[int, str, str]:
+    def _cli(self, args: list[str], stdin: str | None = None) -> tuple[int, str, str]:
         """Run a git-bug CLI command."""
         return git_bug_cli(self._repo, args, stdin=stdin)
 
@@ -58,9 +58,7 @@ class BugWriter:
         # Parse human_id from output like "abc1234 created"
         match = _NEW_BUG_RE.match(out.strip())
         if not match:
-            raise CliError(
-                'could not parse bug ID from git bug new output: %s' % out
-            )
+            raise CliError('could not parse bug ID from git bug new output: %s' % out)
         human_id = match.group(1)
 
         self._reader.invalidate()
@@ -71,10 +69,15 @@ class BugWriter:
         """Add a comment to a bug and return the new Comment."""
         bid = self._reader.resolve_bug_id(bid)
         args = [
-            'bug', 'comment', 'new', bid,
-            '-F', '-', '--non-interactive',
+            'bug',
+            'comment',
+            'new',
+            bid,
+            '-F',
+            '-',
+            '--non-interactive',
         ]
-        ecode, out, err = self._cli(args, stdin=text)
+        ecode, _out, err = self._cli(args, stdin=text)
         if ecode != 0:
             raise CliError('git bug comment new failed: %s' % err)
         self._reader.invalidate(bid)
@@ -89,10 +92,15 @@ class BugWriter:
         """
         bid = self._reader.resolve_bug_id(bid)
         args = [
-            'bug', 'comment', 'edit', comment_id,
-            '-F', '-', '--non-interactive',
+            'bug',
+            'comment',
+            'edit',
+            comment_id,
+            '-F',
+            '-',
+            '--non-interactive',
         ]
-        ecode, out, err = self._cli(args, stdin=text)
+        ecode, _out, err = self._cli(args, stdin=text)
         if ecode != 0:
             raise CliError('git bug comment edit failed: %s' % err)
         self._reader.invalidate(bid)
@@ -104,7 +112,7 @@ class BugWriter:
             subcmd = 'close'
         else:
             subcmd = 'open'
-        ecode, out, err = self._cli(['bug', 'status', subcmd, bid])
+        ecode, _out, err = self._cli(['bug', 'status', subcmd, bid])
         if ecode != 0:
             raise CliError('git bug status %s failed: %s' % (subcmd, err))
         self._reader.invalidate(bid)
@@ -113,7 +121,7 @@ class BugWriter:
         """Edit a bug's title."""
         bid = self._reader.resolve_bug_id(bid)
         args = ['bug', 'title', 'edit', bid, '-t', title]
-        ecode, out, err = self._cli(args)
+        ecode, _out, err = self._cli(args)
         if ecode != 0:
             raise CliError('git bug title edit failed: %s' % err)
         self._reader.invalidate(bid)
@@ -121,7 +129,7 @@ class BugWriter:
     def add_label(self, bid: str, label: str) -> None:
         """Add a label to a bug."""
         bid = self._reader.resolve_bug_id(bid)
-        ecode, out, err = self._cli(
+        ecode, _out, err = self._cli(
             ['bug', 'label', 'new', bid, label],
         )
         if ecode != 0:
@@ -131,7 +139,7 @@ class BugWriter:
     def remove_label(self, bid: str, label: str) -> None:
         """Remove a label from a bug."""
         bid = self._reader.resolve_bug_id(bid)
-        ecode, out, err = self._cli(
+        ecode, _out, err = self._cli(
             ['bug', 'label', 'rm', bid, label],
         )
         if ecode != 0:
@@ -145,7 +153,7 @@ class BugWriter:
         remote copies. This is irreversible.
         """
         bid = self._reader.resolve_bug_id(bid)
-        ecode, out, err = self._cli(['bug', 'rm', bid])
+        ecode, _out, err = self._cli(['bug', 'rm', bid])
         if ecode != 0:
             raise CliError('git bug rm failed: %s' % err)
         # Invalidate everything — the refs list has changed
@@ -166,4 +174,3 @@ class BugWriter:
         invalidate caches after a successful pull.
         """
         return self._cli(['pull', remote])
-

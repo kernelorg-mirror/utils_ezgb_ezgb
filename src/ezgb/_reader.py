@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2024 by the Linux Foundation
 """Git object reading, operation pack replay, and caching for ezgb."""
+
 from __future__ import annotations
 
 import hashlib
@@ -103,7 +104,9 @@ class BugReader:
         return bytes(obj.data)
 
     def _walk_ref_tree_blobs(
-        self, refname: str, target_file: str = 'ops',
+        self,
+        refname: str,
+        target_file: str = 'ops',
     ) -> list[tuple[str, str]]:
         """Walk the commit chain for a ref and find named blobs.
 
@@ -132,7 +135,9 @@ class BugReader:
 
     @staticmethod
     def _check_format_version_tree(
-        tree: pygit2.Tree, prefix: str, supported: int,
+        tree: pygit2.Tree,
+        prefix: str,
+        supported: int,
     ) -> None:
         """Validate the git-bug format version from a commit tree.
 
@@ -143,7 +148,7 @@ class BugReader:
             name: str = entry.name or ''
             if name.startswith(prefix):
                 try:
-                    version = int(name[len(prefix):])
+                    version = int(name[len(prefix) :])
                 except ValueError:
                     continue
                 if version != supported:
@@ -156,7 +161,10 @@ class BugReader:
     # -- Ref enumeration -----------------------------------------------------
 
     def _list_refs(
-        self, prefix: str, *, since: int = 0,
+        self,
+        prefix: str,
+        *,
+        since: int = 0,
     ) -> list[tuple[str, str]]:
         """Return ``[(entity_id, commit_hex)]`` for refs under *prefix*.
 
@@ -178,7 +186,9 @@ class BugReader:
         return results
 
     def list_bug_refs(
-        self, *, since: int = 0,
+        self,
+        *,
+        since: int = 0,
     ) -> list[tuple[str, str]]:
         """Return ``[(bug_id, commit_hash)]`` for all bugs."""
         return self._list_refs('refs/bugs/', since=since)
@@ -217,7 +227,8 @@ class BugReader:
     # -- Operation pack parsing ----------------------------------------------
 
     def _get_op_packs(
-        self, bid: str,
+        self,
+        bid: str,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Walk the commit chain for a bug and return operation packs
         (oldest first) together with the raw blob strings.
@@ -236,8 +247,7 @@ class BugReader:
         ref = self._pygit.references.get(refname)
         if ref is not None:
             tip = ref.peel(pygit2.Commit)
-            self._check_format_version_tree(
-                tip.tree, 'version-', SUPPORTED_BUG_FORMAT)
+            self._check_format_version_tree(tip.tree, 'version-', SUPPORTED_BUG_FORMAT)
         packs: list[dict[str, Any]] = []
         raw_blobs: list[str] = []
         for _commit, blob_hash in entries:
@@ -247,7 +257,8 @@ class BugReader:
             except json.JSONDecodeError:
                 logger.warning(
                     'failed to parse ops blob %s for bug %s',
-                    blob_hash, bid,
+                    blob_hash,
+                    bid,
                 )
                 continue
             packs.append(pack)
@@ -266,7 +277,9 @@ class BugReader:
             return self._identity_cache[identity_id]
 
         fallback = Identity(
-            id=identity_id, name=identity_id, email=identity_id,
+            id=identity_id,
+            name=identity_id,
+            email=identity_id,
         )
         refname = 'refs/identities/' + identity_id
         try:
@@ -285,8 +298,7 @@ class BugReader:
 
         version_blob = tip.tree['version']
         try:
-            raw = self._pygit[version_blob.id].data.decode(
-                errors='replace')
+            raw = self._pygit[version_blob.id].data.decode(errors='replace')
             data: dict[str, Any] = json.loads(raw)
         except (json.JSONDecodeError, KeyError):
             self._identity_cache[identity_id] = fallback
@@ -392,7 +404,8 @@ class BugReader:
         raise ValueError('cannot parse since=%s' % since)
 
     def build_bug(
-        self, bid: str,
+        self,
+        bid: str,
         packs: list[dict[str, Any]] | None = None,
         raw_blobs: list[str] | None = None,
     ) -> Bug:
@@ -429,13 +442,13 @@ class BugReader:
 
         for pack_idx, pack in enumerate(packs):
             author_id = pack.get('author', {}).get('id', '')
-            raw_ops = (raw_ops_per_pack[pack_idx]
-                       if pack_idx < len(raw_ops_per_pack) else [])
+            raw_ops = (
+                raw_ops_per_pack[pack_idx] if pack_idx < len(raw_ops_per_pack) else []
+            )
             for op_idx, op in enumerate(pack.get('ops', [])):
                 op_type = op.get('type', 0)
                 timestamp = op.get('timestamp', 0)
-                raw_json = (raw_ops[op_idx]
-                            if op_idx < len(raw_ops) else '')
+                raw_json = raw_ops[op_idx] if op_idx < len(raw_ops) else ''
                 op_id = self._op_hash(raw_json) if raw_json else ''
 
                 if op_type == OP_CREATE:
@@ -485,7 +498,7 @@ class BugReader:
 
                 elif op_type == OP_SET_STATUS:
                     status_val = op.get('status', STATUS_OPEN)
-                    is_open = (status_val == STATUS_OPEN)
+                    is_open = status_val == STATUS_OPEN
 
                 elif op_type == OP_LABEL_CHANGE:
                     for lbl in op.get('added') or []:
@@ -531,7 +544,8 @@ class BugReader:
         return bug
 
     def build_bug_summary(
-        self, bid: str,
+        self,
+        bid: str,
         packs: list[dict[str, Any]] | None = None,
     ) -> BugSummary:
         """Build a lightweight bug summary by replaying operation packs.
@@ -583,7 +597,7 @@ class BugReader:
 
                 elif op_type == OP_SET_STATUS:
                     status_val = op.get('status', STATUS_OPEN)
-                    is_open = (status_val == STATUS_OPEN)
+                    is_open = status_val == STATUS_OPEN
 
                 elif op_type == OP_LABEL_CHANGE:
                     for lbl in op.get('added') or []:
@@ -605,8 +619,7 @@ class BugReader:
         author_name = ''
         if creator_id:
             author_name = self.resolve_identity(creator_id).name
-        edited_at = (self._format_timestamp(latest_ts)
-                     if latest_ts else created_at)
+        edited_at = self._format_timestamp(latest_ts) if latest_ts else created_at
 
         summary = BugSummary(
             id=bid,

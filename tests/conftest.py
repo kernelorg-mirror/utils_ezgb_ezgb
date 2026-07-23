@@ -3,7 +3,13 @@
 Creates real git objects in temporary bare repos using pygit2 so
 the BugReader can read them without subprocess mocking.
 """
+
+from __future__ import annotations
+
 import json
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pygit2
@@ -21,29 +27,37 @@ BUG_ID = 'c' * 64
 # Signature used for all test commits
 _SIG = pygit2.Signature('Test', 'test@test.com')
 
+# Type alias for operation dictionaries
+Op = dict[str, Any]
+
 
 # -- Test data factories -----------------------------------------------------
 
-def make_identity_version(name, email):
+
+def make_identity_version(name: str, email: str) -> str:
     """Build a JSON identity version blob (format 2)."""
-    return json.dumps({
-        'version': 2,
-        'unix_time': 1700000000,
-        'name': name,
-        'email': email,
-        'login': email.split('@')[0],
-    })
+    return json.dumps(
+        {
+            'version': 2,
+            'unix_time': 1700000000,
+            'name': name,
+            'email': email,
+            'login': email.split('@')[0],
+        }
+    )
 
 
-def make_op_pack(author_id, ops):
+def make_op_pack(author_id: str, ops: list[Op]) -> str:
     """Build a JSON operation pack with author and ops array."""
-    return json.dumps({
-        'author': {'id': author_id},
-        'ops': ops,
-    })
+    return json.dumps(
+        {
+            'author': {'id': author_id},
+            'ops': ops,
+        }
+    )
 
 
-def make_create_op(title, message, timestamp=1700000000):
+def make_create_op(title: str, message: str, timestamp: int = 1700000000) -> Op:
     """Build an OP_CREATE (type 1) operation."""
     return {
         'type': 1,
@@ -54,7 +68,7 @@ def make_create_op(title, message, timestamp=1700000000):
     }
 
 
-def make_comment_op(message, timestamp=1700001000):
+def make_comment_op(message: str, timestamp: int = 1700001000) -> Op:
     """Build an OP_ADD_COMMENT (type 3) operation."""
     return {
         'type': 3,
@@ -64,46 +78,60 @@ def make_comment_op(message, timestamp=1700001000):
     }
 
 
-def make_set_title_op(title, timestamp=1700002000):
+def make_set_title_op(title: str, timestamp: int = 1700002000) -> Op:
     """Build an OP_SET_TITLE (type 2) operation."""
     return {'type': 2, 'timestamp': timestamp, 'title': title}
 
 
-def make_set_status_op(status, timestamp=1700003000):
+def make_set_status_op(status: int, timestamp: int = 1700003000) -> Op:
     """Build an OP_SET_STATUS (type 4) operation."""
     return {'type': 4, 'timestamp': timestamp, 'status': status}
 
 
-def make_edit_comment_op(target, message, timestamp=1700002500):
+def make_edit_comment_op(target: str, message: str, timestamp: int = 1700002500) -> Op:
     """Build an OP_EDIT_COMMENT (type 6) operation."""
     return {
-        'type': 6, 'timestamp': timestamp,
-        'target': target, 'message': message,
+        'type': 6,
+        'timestamp': timestamp,
+        'target': target,
+        'message': message,
     }
 
 
-def make_label_change_op(added=None, removed=None, timestamp=1700004000):
+def make_label_change_op(
+    added: list[str] | None = None,
+    removed: list[str] | None = None,
+    timestamp: int = 1700004000,
+) -> Op:
     """Build an OP_LABEL_CHANGE (type 5) operation."""
     return {
-        'type': 5, 'timestamp': timestamp,
-        'added': added or [], 'removed': removed or [],
+        'type': 5,
+        'timestamp': timestamp,
+        'added': added or [],
+        'removed': removed or [],
     }
 
 
-def make_set_metadata_op(metadata, timestamp=1700005000):
+def make_set_metadata_op(metadata: dict[str, str], timestamp: int = 1700005000) -> Op:
     """Build an OP_SET_METADATA (type 8) operation."""
     return {'type': 8, 'timestamp': timestamp, 'new_metadata': metadata}
 
 
-def make_noop_op(timestamp=1700006000):
+def make_noop_op(timestamp: int = 1700006000) -> Op:
     """Build an OP_NOOP (type 7) operation."""
     return {'type': 7, 'timestamp': timestamp}
 
 
 # -- Real git object helpers -------------------------------------------------
 
-def _create_bug_commit(repo, refname, ops_json, parent_oid=None,
-                       version_tag='version-4'):
+
+def _create_bug_commit(
+    repo: pygit2.Repository,
+    refname: str,
+    ops_json: str,
+    parent_oid: pygit2.Oid | None = None,
+    version_tag: str = 'version-4',
+) -> pygit2.Oid:
     """Create a single bug commit with an ops blob and version marker.
 
     If *parent_oid* is given the new commit is chained after it.
@@ -119,11 +147,18 @@ def _create_bug_commit(repo, refname, ops_json, parent_oid=None,
 
     parents = [parent_oid] if parent_oid else []
     return repo.create_commit(
-        refname, _SIG, _SIG, 'op pack', tree_oid, parents,
+        refname,
+        _SIG,
+        _SIG,
+        'op pack',
+        tree_oid,
+        parents,
     )
 
 
-def _create_identity_commit(repo, refname, version_json):
+def _create_identity_commit(
+    repo: pygit2.Repository, refname: str, version_json: str
+) -> pygit2.Oid:
     """Create an identity commit with a ``version`` blob.
 
     Returns the commit OID.
@@ -135,13 +170,19 @@ def _create_identity_commit(repo, refname, version_json):
     tree_oid = tb.write()
 
     return repo.create_commit(
-        refname, _SIG, _SIG, 'identity', tree_oid, [],
+        refname,
+        _SIG,
+        _SIG,
+        'identity',
+        tree_oid,
+        [],
     )
 
 
 # -- Convenience setup -------------------------------------------------------
 
-def setup_identity(repo_path, identity_id, name, email):
+
+def setup_identity(repo_path: str, identity_id: str, name: str, email: str) -> None:
     """Create real identity git objects in the repo at *repo_path*.
 
     Writes a ``refs/identities/<id>`` ref pointing at a commit whose
@@ -153,10 +194,17 @@ def setup_identity(repo_path, identity_id, name, email):
     _create_identity_commit(repo, refname, version_json)
 
 
-def setup_single_bug(repo_path, reader, bid=BUG_ID, title='Test bug',
-                     message='Bug description', timestamp=1700000000,
-                     extra_ops=None, author_id=IDENTITY_ID,
-                     extra_packs=None):
+def setup_single_bug(
+    repo_path: str,
+    reader: BugReader,
+    bid: str = BUG_ID,
+    title: str = 'Test bug',
+    message: str = 'Bug description',
+    timestamp: int = 1700000000,
+    extra_ops: list[Op] | None = None,
+    author_id: str = IDENTITY_ID,
+    extra_packs: list[str] | None = None,
+) -> None:
     """Create real git objects for a single bug with one create op.
 
     The bug ref ``refs/bugs/<bid>`` is created in the repo at
@@ -178,7 +226,10 @@ def setup_single_bug(repo_path, reader, bid=BUG_ID, title='Test bug',
     if extra_packs:
         for extra_json in extra_packs:
             parent = _create_bug_commit(
-                repo, refname, extra_json, parent_oid=parent,
+                repo,
+                refname,
+                extra_json,
+                parent_oid=parent,
             )
 
     # Pre-cache bug ID resolution so tests don't need separate
@@ -189,10 +240,21 @@ def setup_single_bug(repo_path, reader, bid=BUG_ID, title='Test bug',
     setup_identity(repo_path, author_id, 'Alice', 'alice@example.com')
 
 
+# -- Mock writer for testing -------------------------------------------------
+
+
+class _MockWriter(BugWriter):
+    """BugWriter subclass exposing captured CLI calls/routes in tests."""
+
+    _cli_calls: list[list[str]]
+    _cli_routes: dict[str, Any]
+
+
 # -- Fixtures ----------------------------------------------------------------
 
+
 @pytest.fixture()
-def repo_path(tmp_path):
+def repo_path(tmp_path: Path) -> str:
     """Create a bare git repo and return its path as a string."""
     repo_dir = tmp_path / 'repo'
     pygit2.init_repository(str(repo_dir), bare=True)
@@ -200,37 +262,39 @@ def repo_path(tmp_path):
 
 
 @pytest.fixture()
-def reader(repo_path):
+def reader(repo_path: str) -> BugReader:
     """Create a BugReader pointing at the test repo."""
     return BugReader(repo_path)
 
 
 @pytest.fixture()
-def writer(reader, repo_path):
+def writer(reader: BugReader, repo_path: str) -> Iterator[_MockWriter]:
     """Create a BugWriter with git_bug_cli mocked.
 
     Write operations shell out to the ``git bug`` CLI, which isn't
     available in tests, so we mock it. The mock captures calls in
     ``writer._cli_calls`` for assertion.
     """
-    cli_routes = {}
-    cli_calls = []
+    cli_routes: dict[str, Any] = {}
+    cli_calls: list[list[str]] = []
 
-    def _cli_side_effect(rp, args, stdin=None):
+    def _cli_side_effect(
+        rp: str, args: list[str], stdin: str | None = None
+    ) -> tuple[int, str, str]:
         cli_calls.append(args)
         joined = ' '.join(args)
         for key, value in cli_routes.items():
             if key in joined:
                 if callable(value):
-                    return value(rp, args)
-                return value
+                    return value(rp, args)  # type: ignore[no-any-return]
+                return value  # type: ignore[no-any-return]
         return (0, '', '')
 
-    with patch('ezgb._writer.git_bug_cli',
-               side_effect=_cli_side_effect), \
-         patch('ezgb._git.git_bug_cli',
-               side_effect=_cli_side_effect):
-        w = BugWriter(repo_path, reader)
+    with (
+        patch('ezgb._writer.git_bug_cli', side_effect=_cli_side_effect),
+        patch('ezgb._git.git_bug_cli', side_effect=_cli_side_effect),
+    ):
+        w = _MockWriter(repo_path, reader)
         w._cli_calls = cli_calls
         w._cli_routes = cli_routes
         yield w

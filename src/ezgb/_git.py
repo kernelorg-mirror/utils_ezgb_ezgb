@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2024 by the Linux Foundation
 """Thin git subprocess helpers for ezgb."""
+
 from __future__ import annotations
 
 import os
@@ -44,14 +45,15 @@ def git_run(
 
 def git_lines(repo_path: str, args: list[str]) -> list[str]:
     """Run a git command and return non-empty output lines."""
-    ecode, out = git_run(repo_path, args)
+    _ecode, out = git_run(repo_path, args)
     if not isinstance(out, str):
         out = out.decode(errors='replace')
     return [line for line in out.split('\n') if line]
 
 
 def git_bug_cli(
-    repo_path: str, args: list[str],
+    repo_path: str,
+    args: list[str],
     stdin: str | None = None,
 ) -> tuple[int, str, str]:
     """Run ``git -C REPO bug <args>`` for write operations.
