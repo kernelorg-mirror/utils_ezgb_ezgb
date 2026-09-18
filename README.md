@@ -59,16 +59,17 @@ make -C docs html
 
 Then open `docs/_build/html/index.html` in your browser.
 
-## Running tests
+## Development checks
 
 ```bash
-pip install -e '.[dev]'
-python -m pytest
+uv sync --all-groups
+./ci.sh
 ```
 
-The test suite includes unit tests (using real git objects in temporary
-repos via pygit2) and integration tests that exercise the full stack
-including the `git-bug` binary.
+The CI script runs Ruff, ty, mypy, pyright, and pytest. The test suite
+includes unit tests (using real git objects in temporary repos via
+pygit2) and integration tests that exercise the full stack including the
+`git-bug` binary.
 
 ## Contributing
 

@@ -28,16 +28,17 @@ contributor guide has a good overview:
 
 - Python 3.10+, `from __future__ import annotations` in every module.
 - `%`-style string formatting to match the existing code.
-- Run `ruff check` and `mypy --strict` before submitting.
+- Run `./ci.sh` before submitting.
 
-## Running tests
+## Development checks
 
-    pip install -e '.[dev]'
-    python -m pytest
+    uv sync --all-groups
+    ./ci.sh
 
-The test suite includes unit tests (using real git objects in temporary
-repos via pygit2) and integration tests that exercise the full stack
-including the `git-bug` binary.
+The CI script runs Ruff, ty, mypy, pyright, and pytest. The test suite
+includes unit tests (using real git objects in temporary repos via
+pygit2) and integration tests that exercise the full stack including the
+`git-bug` binary.
 
 ## Licensing
 
