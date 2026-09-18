@@ -23,7 +23,7 @@ from ezgb._models import (
     Status,
     UnsupportedFormatError,
 )
-from ezgb._reader import BugReader
+from ezgb._reader import BugReader, parse_since
 from ezgb._types import JsonValue
 from ezgb._writer import BugWriter
 
@@ -77,9 +77,7 @@ class GitBugRepo:
                 since = since.replace(tzinfo=timezone.utc)
             return int(since.timestamp())
         # str -- delegate to the reader's parser
-        from ezgb._reader import BugReader
-
-        return BugReader._parse_since(since)
+        return parse_since(since)
 
     def list_bugs(
         self,
@@ -207,7 +205,7 @@ class GitBugRepo:
             author_id = author.get('id', '') if isinstance(author, dict) else ''
             raw_labels = raw.get('labels') or []
             if isinstance(raw_labels, list):
-                labels = frozenset(str(lb) for lb in raw_labels)
+                labels: frozenset[str] = frozenset(str(lb) for lb in raw_labels)
             else:
                 labels = frozenset()
             comment_count = raw.get('comments', 0)

@@ -56,6 +56,26 @@ def _is_dict_values(value: dict[_K, _T], value_ty: type[_U]) -> TypeGuard[dict[_
     return all(isinstance(value, value_ty) for value in value.values())
 
 
+def parse_since(since: str) -> int:
+    """Parse a datetime string to a unix timestamp.
+
+    Accepts ISO-8601 variants and ``YYYYMMDDHHMMSS``.
+    """
+    since = since.strip()
+    for fmt in (
+        '%Y-%m-%d %H:%M:%S',
+        '%Y%m%d%H%M%S',
+        '%Y-%m-%dT%H:%M:%SZ',
+        '%Y-%m-%dT%H:%M:%S',
+    ):
+        try:
+            dt = datetime.strptime(since, fmt).replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            continue
+    raise ValueError('cannot parse since=%s' % since)
+
+
 def _combine_ids(primary: str, secondary: str) -> str:
     """Interleave primary and secondary IDs into a CombinedId.
 
@@ -411,26 +431,6 @@ class BugReader:
     def _format_timestamp(unix_ts: int) -> datetime:
         """Convert a unix timestamp to a timezone-aware datetime."""
         return datetime.fromtimestamp(unix_ts, tz=timezone.utc)
-
-    @staticmethod
-    def _parse_since(since: str) -> int:
-        """Parse a datetime string to a unix timestamp.
-
-        Accepts ISO-8601 variants and ``YYYYMMDDHHMMSS``.
-        """
-        since = since.strip()
-        for fmt in (
-            '%Y-%m-%d %H:%M:%S',
-            '%Y%m%d%H%M%S',
-            '%Y-%m-%dT%H:%M:%SZ',
-            '%Y-%m-%dT%H:%M:%S',
-        ):
-            try:
-                dt = datetime.strptime(since, fmt).replace(tzinfo=timezone.utc)
-                return int(dt.timestamp())
-            except ValueError:
-                continue
-        raise ValueError('cannot parse since=%s' % since)
 
     def build_bug(
         self,
