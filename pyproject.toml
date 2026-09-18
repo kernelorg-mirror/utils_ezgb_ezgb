@@ -7,7 +7,7 @@ name = 'ezgb'
 version = '0.2.0'
 description = 'A standalone Python library for working with git-bug repositories'
 readme = 'README.md'
-requires-python = '>=3.9'
+requires-python = '>=3.10'
 dependencies = ['pygit2']
 license = 'GPL-2.0-or-later'
 license-files = ['COPYING']
@@ -30,6 +30,7 @@ dev = [
     "pytest",
     "ruff",
     "ty",
+    "typing-extensions>=4.4",
 ]
 
 [project.urls]

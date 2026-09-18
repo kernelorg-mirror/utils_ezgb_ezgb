@@ -35,7 +35,7 @@ repo.add_comment(bug.id, 'I can reproduce this on Firefox 130.')
 
 ## Requirements
 
-- Python 3.9 or later
+- Python 3.10 or later
 - pygit2 (libgit2 Python bindings)
 - `git-bug` v0.10+ on your `$PATH` (needed for write operations and
   fast cached listing)

@@ -11,7 +11,7 @@ Python library
 Requirements
 ^^^^^^^^^^^^
 
-- **Python 3.9** or later.
+- **Python 3.10** or later.
 - **pygit2** -- Python bindings for libgit2 (``pip install pygit2``).
 - **git-bug** (v0.10 or later) must be on your ``$PATH`` if you want to
   create or modify bugs, or to use the fast CLI-cache listing path.

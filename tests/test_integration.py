@@ -10,13 +10,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from ezgb import GitBugRepo, Status
+from ezgb._types import JsonValue
 
 pytestmark = pytest.mark.skipif(
     shutil.which('git-bug') is None,
@@ -25,19 +24,18 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture()
-def gb_repo(tmp_path: Path) -> Iterator[GitBugRepo]:
+def gb_repo(tmp_path: Path) -> GitBugRepo:
     """Spin up a temporary git repo with git-bug and a test identity."""
     repo_dir = tmp_path / 'repo'
     repo_dir.mkdir()
     repo_path = str(repo_dir)
 
-    def _run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             args,
             capture_output=True,
             text=True,
             check=True,
-            **kwargs,
         )
 
     # Initialise the git repo
@@ -63,10 +61,15 @@ def gb_repo(tmp_path: Path) -> Iterator[GitBugRepo]:
         ]
     )
     result = _run(['git', '-C', repo_path, 'bug', 'user', '-f', 'json'])
-    users = json.loads(result.stdout)
-    _run(['git', '-C', repo_path, 'bug', 'user', 'adopt', users[0]['id']])
+    users: JsonValue = json.loads(result.stdout)
+    assert isinstance(users, list)
+    user = users[0]
+    assert isinstance(user, dict)
+    user_id = user['id']
+    assert isinstance(user_id, str)
+    _run(['git', '-C', repo_path, 'bug', 'user', 'adopt', user_id])
 
-    yield GitBugRepo(repo_path)
+    return GitBugRepo(repo_path)
 
 
 # ------------------------------------------------------------------

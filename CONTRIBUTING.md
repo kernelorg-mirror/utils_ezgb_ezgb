@@ -26,7 +26,7 @@ contributor guide has a good overview:
 
 ## Coding style
 
-- Python 3.9+, `from __future__ import annotations` in every module.
+- Python 3.10+, `from __future__ import annotations` in every module.
 - `%`-style string formatting to match the existing code.
 - Run `ruff check` and `mypy --strict` before submitting.
 

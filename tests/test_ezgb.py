@@ -17,9 +17,9 @@ import pytest
 from conftest import (
     BUG_ID,
     IDENTITY_ID,
+    RecordingBugWriter,
     _create_bug_commit,
     _create_identity_commit,
-    _MockWriter,
     make_comment_op,
     make_create_op,
     make_edit_comment_op,
@@ -42,6 +42,7 @@ from ezgb import (
     UnsupportedFormatError,
 )
 from ezgb._reader import BugReader, _combine_ids
+from ezgb._types import JsonObject
 
 # ------------------------------------------------------------------
 # Unit tests: _combine_ids
@@ -216,7 +217,7 @@ class TestBuildBug:
         assert bug.comments[1].text == 'A follow-up'
 
     def test_comment_with_attachment(self, reader: BugReader, repo_path: str) -> None:
-        ops = [
+        ops: list[JsonObject] = [
             {
                 'type': 1,
                 'timestamp': 1700000000,
@@ -565,7 +566,10 @@ class TestInvalidate:
 
 class TestCreateBug:
     def test_creates_and_returns_bug(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         new_id = 'd' * 64
         prefix = new_id[:7]
@@ -594,7 +598,10 @@ class TestCreateBug:
 
 class TestAddComment:
     def test_adds_and_returns_comment(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         setup_single_bug(repo_path, reader)
 
@@ -629,13 +636,21 @@ class TestAddComment:
 
 class TestSetStatus:
     def test_close(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         setup_single_bug(repo_path, reader)
         writer.set_status(BUG_ID, Status.CLOSED)
         assert any('close' in ' '.join(c) for c in writer._cli_calls)
 
-    def test_open(self, reader: BugReader, writer: _MockWriter, repo_path: str) -> None:
+    def test_open(
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
+    ) -> None:
         setup_single_bug(repo_path, reader)
         writer.set_status(BUG_ID, Status.OPEN)
         assert any('open' in ' '.join(c) for c in writer._cli_calls)
@@ -648,7 +663,10 @@ class TestSetStatus:
 
 class TestSetTitle:
     def test_updates_title(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         setup_single_bug(repo_path, reader)
         writer.set_title(BUG_ID, 'New title')
@@ -662,14 +680,20 @@ class TestSetTitle:
 
 class TestLabels:
     def test_add_label(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         setup_single_bug(repo_path, reader)
         writer.add_label(BUG_ID, 'priority/high')
         assert any('priority/high' in ' '.join(c) for c in writer._cli_calls)
 
     def test_remove_label(
-        self, reader: BugReader, writer: _MockWriter, repo_path: str
+        self,
+        reader: BugReader,
+        writer: RecordingBugWriter,
+        repo_path: str,
     ) -> None:
         setup_single_bug(repo_path, reader)
         writer.remove_label(BUG_ID, 'old-label')

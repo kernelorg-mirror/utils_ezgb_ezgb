@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import TypeGuard, TypeVar
 
 import pygit2
 
@@ -36,11 +36,24 @@ from ezgb._models import (
     Status,
     UnsupportedFormatError,
 )
+from ezgb._types import JsonObject, JsonValue
 
 logger = logging.getLogger('ezgb')
 
 # Length of a full git-bug entity ID (SHA-256 hex)
 _ID_LENGTH = 64
+
+_K = TypeVar('_K')
+_T = TypeVar('_T')
+_U = TypeVar('_U')
+
+
+def _is_list(value: list[_T], item_ty: type[_U]) -> TypeGuard[list[_U]]:
+    return all(isinstance(item, item_ty) for item in value)
+
+
+def _is_dict_values(value: dict[_K, _T], value_ty: type[_U]) -> TypeGuard[dict[_K, _U]]:
+    return all(isinstance(value, value_ty) for value in value.values())
 
 
 def _combine_ids(primary: str, secondary: str) -> str:
@@ -74,7 +87,7 @@ class BugReader:
         gitdir = repo_path
         if os.path.isdir(os.path.join(repo_path, '.git')):
             gitdir = os.path.join(repo_path, '.git')
-        self._pygit: Any = pygit2.Repository(gitdir)
+        self._pygit: pygit2.Repository = pygit2.Repository(gitdir)
         self._bug_cache: dict[str, Bug] = {}
         self._summary_cache: dict[str, BugSummary] = {}
         self._identity_cache: dict[str, Identity] = {}
@@ -88,7 +101,7 @@ class BugReader:
             obj = self._pygit.get(blob_hash)
         except (ValueError, KeyError):
             obj = None
-        if obj is None or obj.type != pygit2.GIT_OBJECT_BLOB:
+        if obj is None or not isinstance(obj, pygit2.Blob):
             raise BugNotFoundError('failed to read blob %s' % blob_hash)
         result: str = obj.data.decode(errors='replace')
         return result
@@ -99,7 +112,7 @@ class BugReader:
             obj = self._pygit.get(blob_hash)
         except (ValueError, KeyError):
             obj = None
-        if obj is None or obj.type != pygit2.GIT_OBJECT_BLOB:
+        if obj is None or not isinstance(obj, pygit2.Blob):
             raise BugNotFoundError('failed to read blob %s' % blob_hash)
         return bytes(obj.data)
 
@@ -229,7 +242,7 @@ class BugReader:
     def _get_op_packs(
         self,
         bid: str,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[JsonObject], list[str]]:
         """Walk the commit chain for a bug and return operation packs
         (oldest first) together with the raw blob strings.
 
@@ -248,12 +261,12 @@ class BugReader:
         if ref is not None:
             tip = ref.peel(pygit2.Commit)
             self._check_format_version_tree(tip.tree, 'version-', SUPPORTED_BUG_FORMAT)
-        packs: list[dict[str, Any]] = []
+        packs: list[JsonObject] = []
         raw_blobs: list[str] = []
         for _commit, blob_hash in entries:
             raw = self._cat_blob(blob_hash)
             try:
-                pack: dict[str, Any] = json.loads(raw)
+                pack: JsonValue = json.loads(raw)
             except json.JSONDecodeError:
                 logger.warning(
                     'failed to parse ops blob %s for bug %s',
@@ -261,6 +274,7 @@ class BugReader:
                     bid,
                 )
                 continue
+            assert isinstance(pack, dict)
             packs.append(pack)
             raw_blobs.append(raw)
         return packs, raw_blobs
@@ -298,25 +312,36 @@ class BugReader:
 
         version_blob = tip.tree['version']
         try:
-            raw = self._pygit[version_blob.id].data.decode(errors='replace')
-            data: dict[str, Any] = json.loads(raw)
+            blob = self._pygit[version_blob.id]
+            assert isinstance(blob, pygit2.Blob)
+            raw = blob.data.decode(errors='replace')
+            data: JsonValue = json.loads(raw)
         except (json.JSONDecodeError, KeyError):
             self._identity_cache[identity_id] = fallback
             return fallback
+        assert isinstance(data, dict)
 
         # Validate format version
         fmt_version = data.get('version')
+        if fmt_version is not None:
+            assert isinstance(fmt_version, int)
         if fmt_version is not None and fmt_version != SUPPORTED_IDENTITY_FORMAT:
             raise UnsupportedFormatError(
                 'unsupported identity format: %d (expected %d)'
                 % (fmt_version, SUPPORTED_IDENTITY_FORMAT)
             )
 
+        name = data.get('name', identity_id)
+        email = data.get('email', identity_id)
+        login = data.get('login', '')
+        assert isinstance(name, str)
+        assert isinstance(email, str)
+        assert isinstance(login, str)
         identity = Identity(
             id=identity_id,
-            name=data.get('name', identity_id),
-            email=data.get('email', identity_id),
-            login=data.get('login', ''),
+            name=name,
+            email=email,
+            login=login,
         )
         self._identity_cache[identity_id] = identity
         return identity
@@ -357,12 +382,15 @@ class BugReader:
         """
         decoder = json.JSONDecoder()
         try:
+            pack: JsonValue
             pack, _ = decoder.raw_decode(blob_json)
         except json.JSONDecodeError:
             return []
+        assert isinstance(pack, dict)
         raw_ops = pack.get('ops')
         if not raw_ops:
             return []
+        assert isinstance(raw_ops, list)
         # Walk forward through the string to slice each op.
         # Find the start of the ops array value.
         idx = blob_json.find('"ops"')
@@ -373,7 +401,8 @@ class BugReader:
             # we need to step past commas between elements.
             while blob_json[pos] in ' \t\n\r,':
                 pos += 1
-            _, end_pos = decoder.raw_decode(blob_json, pos)
+            _decoded_op: JsonValue
+            _decoded_op, end_pos = decoder.raw_decode(blob_json, pos)
             ops.append(blob_json[pos:end_pos])
             pos = end_pos
         return ops
@@ -406,7 +435,7 @@ class BugReader:
     def build_bug(
         self,
         bid: str,
-        packs: list[dict[str, Any]] | None = None,
+        packs: list[JsonObject] | None = None,
         raw_blobs: list[str] | None = None,
     ) -> Bug:
         """Reconstruct a bug snapshot by replaying operation packs.
@@ -441,24 +470,36 @@ class BugReader:
         op_hash_map: dict[str, Comment] = {}
 
         for pack_idx, pack in enumerate(packs):
-            author_id = pack.get('author', {}).get('id', '')
+            author_value = pack.get('author', {})
+            assert isinstance(author_value, dict)
+            author_id = author_value.get('id', '')
+            assert isinstance(author_id, str)
             raw_ops = (
                 raw_ops_per_pack[pack_idx] if pack_idx < len(raw_ops_per_pack) else []
             )
-            for op_idx, op in enumerate(pack.get('ops', [])):
+            ops = pack.get('ops', [])
+            assert isinstance(ops, list)
+            for op_idx, op in enumerate(ops):
+                assert isinstance(op, dict)
                 op_type = op.get('type', 0)
+                assert isinstance(op_type, int)
                 timestamp = op.get('timestamp', 0)
+                assert isinstance(timestamp, int)
                 raw_json = raw_ops[op_idx] if op_idx < len(raw_ops) else ''
                 op_id = self._op_hash(raw_json) if raw_json else ''
 
                 if op_type == OP_CREATE:
-                    title = op.get('title', '')
+                    if (op_title := op.get('title')) is not None:
+                        assert isinstance(op_title, str)
+                        title = op_title
                     author = self.resolve_identity(author_id)
                     creator = author
                     created_at = self._format_timestamp(timestamp)
-                    message = op.get('message', '')
-                    if message:
+                    if message := op.get('message'):
+                        assert isinstance(message, str)
                         files = op.get('files') or []
+                        assert isinstance(files, list)
+                        assert _is_list(files, str)
                         combined_id = _combine_ids(bid, op_id)
                         cmt = Comment(
                             id=combined_id,
@@ -473,15 +514,22 @@ class BugReader:
                         comment_count += 1
                     # Collect operation-level metadata
                     op_meta = op.get('metadata')
-                    if op_meta:
+                    if op_meta is not None:
+                        assert isinstance(op_meta, dict)
+                        assert _is_dict_values(op_meta, str)
                         metadata.update(op_meta)
 
                 elif op_type == OP_SET_TITLE:
-                    title = op.get('title', title)
+                    if (op_title := op.get('title')) is not None:
+                        assert isinstance(op_title, str)
+                        title = op_title
 
                 elif op_type == OP_ADD_COMMENT:
                     message = op.get('message', '')
+                    assert isinstance(message, str)
                     files = op.get('files') or []
+                    assert isinstance(files, list)
+                    assert _is_list(files, str)
                     op_author = self.resolve_identity(author_id)
                     combined_id = _combine_ids(bid, op_id)
                     cmt = Comment(
@@ -498,27 +546,40 @@ class BugReader:
 
                 elif op_type == OP_SET_STATUS:
                     status_val = op.get('status', STATUS_OPEN)
+                    assert isinstance(status_val, int)
                     is_open = status_val == STATUS_OPEN
 
                 elif op_type == OP_LABEL_CHANGE:
-                    for lbl in op.get('added') or []:
+                    added = op.get('added') or []
+                    assert isinstance(added, list)
+                    for lbl in added:
+                        assert isinstance(lbl, str)
                         labels.add(lbl)
-                    for lbl in op.get('removed') or []:
+                    removed = op.get('removed') or []
+                    assert isinstance(removed, list)
+                    for lbl in removed:
+                        assert isinstance(lbl, str)
                         labels.discard(lbl)
 
                 elif op_type == OP_EDIT_COMMENT:
                     target = op.get('target', '')
+                    assert isinstance(target, str)
                     new_message = op.get('message', '')
+                    assert isinstance(new_message, str)
                     matched = op_hash_map.get(target)
                     if matched is not None:
                         matched.text = new_message
                         new_files = op.get('files') or []
+                        assert isinstance(new_files, list)
+                        assert _is_list(new_files, str)
                         if new_files:
                             matched.attachment_ids = list(new_files)
 
                 elif op_type == OP_SET_METADATA:
                     new_meta = op.get('new_metadata')
-                    if new_meta:
+                    if new_meta is not None:
+                        assert isinstance(new_meta, dict)
+                        assert _is_dict_values(new_meta, str)
                         metadata.update(new_meta)
 
                 elif op_type == OP_NOOP:
@@ -546,7 +607,7 @@ class BugReader:
     def build_bug_summary(
         self,
         bid: str,
-        packs: list[dict[str, Any]] | None = None,
+        packs: list[JsonObject] | None = None,
     ) -> BugSummary:
         """Build a lightweight bug summary by replaying operation packs.
 
@@ -573,36 +634,55 @@ class BugReader:
         latest_ts = 0
 
         for pack in packs:
-            author_id = pack.get('author', {}).get('id', '')
-            for op in pack.get('ops', []):
+            author_value = pack.get('author', {})
+            assert isinstance(author_value, dict)
+            author_id = author_value.get('id', '')
+            assert isinstance(author_id, str)
+            ops = pack.get('ops', [])
+            assert isinstance(ops, list)
+            for op in ops:
+                assert isinstance(op, dict)
                 op_type = op.get('type', 0)
+                assert isinstance(op_type, int)
                 ts = op.get('timestamp', 0)
                 if isinstance(ts, int) and ts > latest_ts:
                     latest_ts = ts
 
                 if op_type == OP_CREATE:
-                    title = op.get('title', '')
+                    if (op_title := op.get('title')) is not None:
+                        assert isinstance(op_title, str)
+                        title = op_title
                     creator_id = author_id
-                    created_at = self._format_timestamp(
-                        op.get('timestamp', 0),
-                    )
-                    if op.get('message', ''):
+                    timestamp = op.get('timestamp', 0)
+                    assert isinstance(timestamp, int)
+                    created_at = self._format_timestamp(timestamp)
+                    if message := op.get('message'):
+                        assert isinstance(message, str)
                         comment_count += 1
 
                 elif op_type == OP_SET_TITLE:
-                    title = op.get('title', title)
+                    if (op_title := op.get('title')) is not None:
+                        assert isinstance(op_title, str)
+                        title = op_title
 
                 elif op_type == OP_ADD_COMMENT:
                     comment_count += 1
 
                 elif op_type == OP_SET_STATUS:
                     status_val = op.get('status', STATUS_OPEN)
+                    assert isinstance(status_val, int)
                     is_open = status_val == STATUS_OPEN
 
                 elif op_type == OP_LABEL_CHANGE:
-                    for lbl in op.get('added') or []:
+                    added = op.get('added') or []
+                    assert isinstance(added, list)
+                    for lbl in added:
+                        assert isinstance(lbl, str)
                         labels.add(lbl)
-                    for lbl in op.get('removed') or []:
+                    removed = op.get('removed') or []
+                    assert isinstance(removed, list)
+                    for lbl in removed:
+                        assert isinstance(lbl, str)
                         labels.discard(lbl)
 
         if created_at is None:
