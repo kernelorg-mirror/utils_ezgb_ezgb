@@ -23,7 +23,8 @@ from ezgb._models import (
     Status,
     UnsupportedFormatError,
 )
-from ezgb._reader import BugReader
+from ezgb._reader import BugReader, parse_since
+from ezgb._types import JsonValue
 from ezgb._writer import BugWriter
 
 __all__ = [
@@ -76,9 +77,7 @@ class GitBugRepo:
                 since = since.replace(tzinfo=timezone.utc)
             return int(since.timestamp())
         # str -- delegate to the reader's parser
-        from ezgb._reader import BugReader
-
-        return BugReader._parse_since(since)
+        return parse_since(since)
 
     def list_bugs(
         self,
@@ -179,11 +178,13 @@ class GitBugRepo:
         if ecode != 0 or not out.strip():
             return None
         try:
-            raw_bugs: list[dict[str, object]] = json.loads(out)
+            raw_bugs: JsonValue = json.loads(out)
         except json.JSONDecodeError:
             return None
+        assert isinstance(raw_bugs, list)
         results: list[BugSummary] = []
         for raw in raw_bugs:
+            assert isinstance(raw, dict)
             bid = str(raw.get('id', ''))
             if not bid:
                 continue
@@ -204,7 +205,7 @@ class GitBugRepo:
             author_id = author.get('id', '') if isinstance(author, dict) else ''
             raw_labels = raw.get('labels') or []
             if isinstance(raw_labels, list):
-                labels = frozenset(str(lb) for lb in raw_labels)
+                labels: frozenset[str] = frozenset(str(lb) for lb in raw_labels)
             else:
                 labels = frozenset()
             comment_count = raw.get('comments', 0)
@@ -275,11 +276,13 @@ class GitBugRepo:
         if ecode != 0:
             return []
         try:
-            raw_bugs: list[dict[str, object]] = json.loads(out)
+            raw_bugs: JsonValue = json.loads(out)
         except json.JSONDecodeError:
             return []
+        assert isinstance(raw_bugs, list)
         results: list[Bug] = []
         for raw in raw_bugs:
+            assert isinstance(raw, dict)
             bid = str(raw.get('id', ''))
             if not bid:
                 continue

@@ -7,15 +7,14 @@ the BugReader can read them without subprocess mocking.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
 import pygit2
 import pytest
+from typing_extensions import override
 
 from ezgb._reader import BugReader
+from ezgb._types import JsonObject
 from ezgb._writer import BugWriter
 
 # -- Constants ---------------------------------------------------------------
@@ -27,8 +26,7 @@ BUG_ID = 'c' * 64
 # Signature used for all test commits
 _SIG = pygit2.Signature('Test', 'test@test.com')
 
-# Type alias for operation dictionaries
-Op = dict[str, Any]
+CliResult = tuple[int, str, str]
 
 
 # -- Test data factories -----------------------------------------------------
@@ -47,7 +45,7 @@ def make_identity_version(name: str, email: str) -> str:
     )
 
 
-def make_op_pack(author_id: str, ops: list[Op]) -> str:
+def make_op_pack(author_id: str, ops: list[JsonObject]) -> str:
     """Build a JSON operation pack with author and ops array."""
     return json.dumps(
         {
@@ -57,7 +55,7 @@ def make_op_pack(author_id: str, ops: list[Op]) -> str:
     )
 
 
-def make_create_op(title: str, message: str, timestamp: int = 1700000000) -> Op:
+def make_create_op(title: str, message: str, timestamp: int = 1700000000) -> JsonObject:
     """Build an OP_CREATE (type 1) operation."""
     return {
         'type': 1,
@@ -68,7 +66,7 @@ def make_create_op(title: str, message: str, timestamp: int = 1700000000) -> Op:
     }
 
 
-def make_comment_op(message: str, timestamp: int = 1700001000) -> Op:
+def make_comment_op(message: str, timestamp: int = 1700001000) -> JsonObject:
     """Build an OP_ADD_COMMENT (type 3) operation."""
     return {
         'type': 3,
@@ -78,17 +76,19 @@ def make_comment_op(message: str, timestamp: int = 1700001000) -> Op:
     }
 
 
-def make_set_title_op(title: str, timestamp: int = 1700002000) -> Op:
+def make_set_title_op(title: str, timestamp: int = 1700002000) -> JsonObject:
     """Build an OP_SET_TITLE (type 2) operation."""
     return {'type': 2, 'timestamp': timestamp, 'title': title}
 
 
-def make_set_status_op(status: int, timestamp: int = 1700003000) -> Op:
+def make_set_status_op(status: int, timestamp: int = 1700003000) -> JsonObject:
     """Build an OP_SET_STATUS (type 4) operation."""
     return {'type': 4, 'timestamp': timestamp, 'status': status}
 
 
-def make_edit_comment_op(target: str, message: str, timestamp: int = 1700002500) -> Op:
+def make_edit_comment_op(
+    target: str, message: str, timestamp: int = 1700002500
+) -> JsonObject:
     """Build an OP_EDIT_COMMENT (type 6) operation."""
     return {
         'type': 6,
@@ -102,22 +102,25 @@ def make_label_change_op(
     added: list[str] | None = None,
     removed: list[str] | None = None,
     timestamp: int = 1700004000,
-) -> Op:
+) -> JsonObject:
     """Build an OP_LABEL_CHANGE (type 5) operation."""
     return {
         'type': 5,
         'timestamp': timestamp,
-        'added': added or [],
-        'removed': removed or [],
+        # git-bug serializes the unused side of a label change as null.
+        'added': list(added) if added is not None else None,
+        'removed': list(removed) if removed is not None else None,
     }
 
 
-def make_set_metadata_op(metadata: dict[str, str], timestamp: int = 1700005000) -> Op:
+def make_set_metadata_op(
+    metadata: JsonObject, timestamp: int = 1700005000
+) -> JsonObject:
     """Build an OP_SET_METADATA (type 8) operation."""
     return {'type': 8, 'timestamp': timestamp, 'new_metadata': metadata}
 
 
-def make_noop_op(timestamp: int = 1700006000) -> Op:
+def make_noop_op(timestamp: int = 1700006000) -> JsonObject:
     """Build an OP_NOOP (type 7) operation."""
     return {'type': 7, 'timestamp': timestamp}
 
@@ -201,7 +204,7 @@ def setup_single_bug(
     title: str = 'Test bug',
     message: str = 'Bug description',
     timestamp: int = 1700000000,
-    extra_ops: list[Op] | None = None,
+    extra_ops: list[JsonObject] | None = None,
     author_id: str = IDENTITY_ID,
     extra_packs: list[str] | None = None,
 ) -> None:
@@ -240,17 +243,29 @@ def setup_single_bug(
     setup_identity(repo_path, author_id, 'Alice', 'alice@example.com')
 
 
-# -- Mock writer for testing -------------------------------------------------
-
-
-class _MockWriter(BugWriter):
-    """BugWriter subclass exposing captured CLI calls/routes in tests."""
-
-    _cli_calls: list[list[str]]
-    _cli_routes: dict[str, Any]
-
-
 # -- Fixtures ----------------------------------------------------------------
+
+
+class RecordingBugWriter(BugWriter):
+    """BugWriter test double that records CLI calls and canned responses."""
+
+    def __init__(self, repo_path: str, reader: BugReader) -> None:
+        super().__init__(repo_path, reader)
+        self._cli_calls: list[list[str]] = []
+        self._cli_routes: dict[str, CliResult] = {}
+
+    @override
+    def _cli(
+        self,
+        args: list[str],
+        stdin: str | None = None,
+    ) -> CliResult:
+        self._cli_calls.append(args)
+        joined = ' '.join(args)
+        for key, value in self._cli_routes.items():
+            if key in joined:
+                return value
+        return (0, '', '')
 
 
 @pytest.fixture()
@@ -268,33 +283,11 @@ def reader(repo_path: str) -> BugReader:
 
 
 @pytest.fixture()
-def writer(reader: BugReader, repo_path: str) -> Iterator[_MockWriter]:
+def writer(reader: BugReader, repo_path: str) -> RecordingBugWriter:
     """Create a BugWriter with git_bug_cli mocked.
 
     Write operations shell out to the ``git bug`` CLI, which isn't
     available in tests, so we mock it. The mock captures calls in
     ``writer._cli_calls`` for assertion.
     """
-    cli_routes: dict[str, Any] = {}
-    cli_calls: list[list[str]] = []
-
-    def _cli_side_effect(
-        rp: str, args: list[str], stdin: str | None = None
-    ) -> tuple[int, str, str]:
-        cli_calls.append(args)
-        joined = ' '.join(args)
-        for key, value in cli_routes.items():
-            if key in joined:
-                if callable(value):
-                    return value(rp, args)  # type: ignore[no-any-return]
-                return value  # type: ignore[no-any-return]
-        return (0, '', '')
-
-    with (
-        patch('ezgb._writer.git_bug_cli', side_effect=_cli_side_effect),
-        patch('ezgb._git.git_bug_cli', side_effect=_cli_side_effect),
-    ):
-        w = _MockWriter(repo_path, reader)
-        w._cli_calls = cli_calls
-        w._cli_routes = cli_routes
-        yield w
+    return RecordingBugWriter(repo_path, reader)

@@ -96,7 +96,7 @@ class Comment:
     text: str
     created_at: datetime
     count: int
-    attachment_ids: list[str] = field(default_factory=list)
+    attachment_ids: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -110,7 +110,7 @@ class Bug:
     created_at: datetime
     labels: set[str]
     comments: list[Comment]
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)

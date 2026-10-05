@@ -35,7 +35,7 @@ repo.add_comment(bug.id, 'I can reproduce this on Firefox 130.')
 
 ## Requirements
 
-- Python 3.9 or later
+- Python 3.10 or later
 - pygit2 (libgit2 Python bindings)
 - `git-bug` v0.10+ on your `$PATH` (needed for write operations and
   fast cached listing)
@@ -59,16 +59,17 @@ make -C docs html
 
 Then open `docs/_build/html/index.html` in your browser.
 
-## Running tests
+## Development checks
 
 ```bash
-pip install -e '.[dev]'
-python -m pytest
+uv sync --all-groups
+./ci.sh
 ```
 
-The test suite includes unit tests (using real git objects in temporary
-repos via pygit2) and integration tests that exercise the full stack
-including the `git-bug` binary.
+The CI script runs Ruff, ty, mypy, pyright, and pytest. The test suite
+includes unit tests (using real git objects in temporary repos via
+pygit2) and integration tests that exercise the full stack including the
+`git-bug` binary.
 
 ## Contributing
 
