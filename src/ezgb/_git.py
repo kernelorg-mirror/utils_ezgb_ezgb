@@ -31,16 +31,10 @@ def git_run(
     if args and args[0] == 'log':
         args.insert(1, '--no-abbrev-commit')
     cmdargs += args
-    sp = subprocess.Popen(
-        cmdargs,
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    out, _err = sp.communicate(input=stdin)
+    sp = subprocess.run(cmdargs, input=stdin, capture_output=True)
     if decode:
-        return sp.returncode, out.decode(errors='replace')
-    return sp.returncode, out
+        return sp.returncode, sp.stdout.decode(errors='replace')
+    return sp.returncode, sp.stdout
 
 
 def git_lines(repo_path: str, args: list[str]) -> list[str]:
@@ -66,12 +60,10 @@ def git_bug_cli(
     Returns ``(returncode, stdout, stderr)``.
     """
     cmdargs = ['git', '--no-pager', '-C', repo_path, 'bug'] + args
-    sp = subprocess.Popen(
-        cmdargs,
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
     in_bytes = stdin.encode() if stdin is not None else None
-    out, err = sp.communicate(input=in_bytes)
-    return sp.returncode, out.decode(errors='replace'), err.decode(errors='replace')
+    sp = subprocess.run(cmdargs, input=in_bytes, capture_output=True)
+    return (
+        sp.returncode,
+        sp.stdout.decode(errors='replace'),
+        sp.stderr.decode(errors='replace'),
+    )

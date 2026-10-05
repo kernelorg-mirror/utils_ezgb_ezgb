@@ -36,7 +36,7 @@ from ezgb._models import (
     Status,
     UnsupportedFormatError,
 )
-from ezgb._types import JsonObject, JsonValue
+from ezgb._types import JsonObject, JsonValue, json_loads, json_raw_decode
 
 logger = logging.getLogger('ezgb')
 
@@ -286,7 +286,7 @@ class BugReader:
         for _commit, blob_hash in entries:
             raw = self._cat_blob(blob_hash)
             try:
-                pack: JsonValue = json.loads(raw)
+                pack: JsonValue = json_loads(raw)
             except json.JSONDecodeError:
                 logger.warning(
                     'failed to parse ops blob %s for bug %s',
@@ -335,7 +335,7 @@ class BugReader:
             blob = self._pygit[version_blob.id]
             assert isinstance(blob, pygit2.Blob)
             raw = blob.data.decode(errors='replace')
-            data: JsonValue = json.loads(raw)
+            data: JsonValue = json_loads(raw)
         except (json.JSONDecodeError, KeyError):
             self._identity_cache[identity_id] = fallback
             return fallback
@@ -400,10 +400,8 @@ class BugReader:
         and slices the string at those boundaries, preserving Go's
         escaping verbatim.
         """
-        decoder = json.JSONDecoder()
         try:
-            pack: JsonValue
-            pack, _ = decoder.raw_decode(blob_json)
+            pack, _ = json_raw_decode(blob_json)
         except json.JSONDecodeError:
             return []
         assert isinstance(pack, dict)
@@ -421,8 +419,7 @@ class BugReader:
             # we need to step past commas between elements.
             while blob_json[pos] in ' \t\n\r,':
                 pos += 1
-            _decoded_op: JsonValue
-            _decoded_op, end_pos = decoder.raw_decode(blob_json, pos)
+            _decoded_op, end_pos = json_raw_decode(blob_json, pos)
             ops.append(blob_json[pos:end_pos])
             pos = end_pos
         return ops

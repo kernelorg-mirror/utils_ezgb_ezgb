@@ -7,7 +7,6 @@ Skip automatically when ``git-bug`` is not installed.
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ezgb import GitBugRepo, Status
-from ezgb._types import JsonValue
+from ezgb._types import JsonValue, json_loads
 
 pytestmark = pytest.mark.skipif(
     shutil.which('git-bug') is None,
@@ -61,7 +60,7 @@ def gb_repo(tmp_path: Path) -> GitBugRepo:
         ]
     )
     result = _run(['git', '-C', repo_path, 'bug', 'user', '-f', 'json'])
-    users: JsonValue = json.loads(result.stdout)
+    users: JsonValue = json_loads(result.stdout)
     assert isinstance(users, list)
     user = users[0]
     assert isinstance(user, dict)

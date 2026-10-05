@@ -24,7 +24,7 @@ from ezgb._models import (
     UnsupportedFormatError,
 )
 from ezgb._reader import BugReader, parse_since
-from ezgb._types import JsonValue
+from ezgb._types import JsonValue, json_loads
 from ezgb._writer import BugWriter
 
 __all__ = [
@@ -178,7 +178,7 @@ class GitBugRepo:
         if ecode != 0 or not out.strip():
             return None
         try:
-            raw_bugs: JsonValue = json.loads(out)
+            raw_bugs: JsonValue = json_loads(out)
         except json.JSONDecodeError:
             return None
         assert isinstance(raw_bugs, list)
@@ -276,7 +276,7 @@ class GitBugRepo:
         if ecode != 0:
             return []
         try:
-            raw_bugs: JsonValue = json.loads(out)
+            raw_bugs: JsonValue = json_loads(out)
         except json.JSONDecodeError:
             return []
         assert isinstance(raw_bugs, list)
