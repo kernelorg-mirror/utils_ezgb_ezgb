@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
 project = 'ezgb'
 copyright = '2024-2026, The Linux Foundation'
 author = 'Konstantin Ryabitsev'
-release = '0.2.0'
+release = '0.2.1'
 
 # -- General configuration ---------------------------------------------------
 

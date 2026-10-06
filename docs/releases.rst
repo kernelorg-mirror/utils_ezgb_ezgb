@@ -9,6 +9,22 @@ see the ``CHANGELOG.rst`` file at the root of the source tree.
    :local:
    :depth: 1
 
+0.2.1 (2026-10-06)
+------------------
+
+This is a maintenance release. ezgb now needs **Python 3.10 or later**.
+Python 3.9 reached end of life in October 2025. If you still use it,
+pip keeps installing 0.2.0 for you.
+
+The library now checks the JSON data that it reads from git-bug before
+using it, so malformed bug data fails early. An operation with a
+``null`` title no longer clears the bug title. The public API does
+not change.
+
+Under the hood, the whole code base now passes strict type checking
+with pyright, mypy and ty, and the ``COPYING`` file has the current
+Free Software Foundation address.
+
 0.2.0 (2026-07-23)
 ------------------
 
